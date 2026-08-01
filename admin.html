@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — Pharmacy Law Assistant corpus</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.min.js"></script>
+<style>
+  :root {
+    --paper: #e9ebf0; --ink: #16233d; --ink-soft: #46536b; --line: #c7ccd8;
+    --amber: #b8460e; --amber-dark: #8f3608; --ok: #3b6e52; --err: #b8460e;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font-family:"IBM Plex Sans",sans-serif; line-height:1.6; padding:24px 16px 64px; }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size:1.4rem; margin: 0 0 4px; }
+  .sub { color: var(--ink-soft); font-size:0.9rem; margin: 0 0 28px; }
+  section { background:#f4f5f8; border:1px solid var(--line); border-radius:4px; padding:18px; margin-bottom:20px; }
+  section h2 { font-size:1rem; margin:0 0 12px; }
+  label { display:block; font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-soft); margin: 12px 0 4px; }
+  label:first-of-type { margin-top:0; }
+  input[type=text], input[type=password], textarea, input[type=file] {
+    width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:3px;
+    font-family:"IBM Plex Sans",sans-serif; font-size:0.95rem; background:#fff; color:var(--ink);
+  }
+  textarea { min-height:90px; font-family:"IBM Plex Mono",monospace; font-size:12px; }
+  button {
+    margin-top:14px; font-family:"IBM Plex Mono",monospace; font-size:13px;
+    background:var(--amber); color:#fff; border:none; border-radius:3px; padding:10px 16px; cursor:pointer;
+  }
+  button:hover { background:var(--amber-dark); }
+  button:disabled { opacity:0.5; cursor:default; }
+  button.secondary { background:transparent; color:var(--ink-soft); border:1px solid var(--line); }
+  .status { margin-top:10px; font-family:"IBM Plex Mono",monospace; font-size:12.5px; white-space:pre-wrap; }
+  .status.ok { color:var(--ok); }
+  .status.err { color:var(--err); }
+  .corpus-list { font-family:"IBM Plex Mono",monospace; font-size:12px; }
+  .corpus-row { padding:8px 0; border-top:1px solid var(--line); }
+  .corpus-row:first-child { border-top:none; }
+  .corpus-row a { color: var(--amber-dark); }
+  .worker-config { font-size:0.85rem; color:var(--ink-soft); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Corpus admin</h1>
+  <p class="sub">Add sources to the pharmacy law chatbot's knowledge base. Not linked from the public site — bookmark this page.</p>
+
+  <section>
+    <h2>1. Connect</h2>
+    <label for="worker-url">Worker URL</label>
+    <input type="text" id="worker-url" placeholder="https://pharmlaw-rag-api.your-subdomain.workers.dev">
+    <label for="admin-key">Admin key</label>
+    <input type="password" id="admin-key" placeholder="the ADMIN_KEY secret you set with wrangler">
+    <p class="worker-config">Kept only in this browser tab's memory — re-enter each visit, never saved to disk.</p>
+  </section>
+
+  <section>
+    <h2>2. Add a source by URL (scrapes it)</h2>
+    <label for="scrape-url">Page URL</label>
+    <input type="text" id="scrape-url" placeholder="https://www.ecfr.gov/current/title-21/...">
+    <label for="scrape-citation">Citation label (optional)</label>
+    <input type="text" id="scrape-citation" placeholder="e.g. 21 CFR § 1306.06">
+    <button id="scrape-btn">Scrape &amp; add</button>
+    <div id="scrape-status" class="status"></div>
+  </section>
+
+  <section>
+    <h2>3. Upload a file (.txt, .md, .html, or .pdf)</h2>
+    <label for="file-input">File</label>
+    <input type="file" id="file-input" accept=".txt,.md,.html,.htm,.pdf">
+    <label for="file-citation">Citation / title label</label>
+    <input type="text" id="file-citation" placeholder="e.g. Washington State Board of Pharmacy — Rule 246-863">
+    <label for="file-preview">Extracted text (auto-filled — you can edit before adding)</label>
+    <textarea id="file-preview" placeholder="Select a file above…"></textarea>
+    <button id="file-btn" disabled>Add to corpus</button>
+    <div id="file-status" class="status"></div>
+  </section>
+
+  <section>
+    <h2>Currently indexed</h2>
+    <button id="refresh-btn" class="secondary">Refresh list</button>
+    <button id="reset-btn" class="secondary">Reset to seed corpus</button>
+    <div id="corpus-status" class="status"></div>
+    <div id="corpus-list" class="corpus-list"></div>
+  </section>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.worker.min.js";
+
+const workerUrlInput = document.getElementById('worker-url');
+const adminKeyInput = document.getElementById('admin-key');
+
+function baseUrl() {
+  return workerUrlInput.value.trim().replace(/\/$/, '');
+}
+function headers() {
+  return { 'Content-Type': 'application/json', 'x-admin-key': adminKeyInput.value.trim() };
+}
+function setStatus(el, msg, ok) {
+  el.textContent = msg;
+  el.className = 'status ' + (ok ? 'ok' : 'err');
+}
+
+// ---- 2. Scrape a URL -------------------------------------------------
+document.getElementById('scrape-btn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('scrape-status');
+  const url = document.getElementById('scrape-url').value.trim();
+  if (!baseUrl()) return setStatus(statusEl, 'Set the Worker URL above first.', false);
+  if (!url) return setStatus(statusEl, 'Enter a page URL.', false);
+
+  setStatus(statusEl, 'Scraping…', true);
+  try {
+    const res = await fetch(baseUrl() + '/ingest/url', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ url, citation: document.getElementById('scrape-citation').value.trim() }),
+    });
+    const data = await res.json();
+    if (!res.ok) return setStatus(statusEl, 'Error: ' + (data.error || res.status), false);
+    setStatus(statusEl, `Added ${data.added} chunk(s) from "${data.title || url}". Corpus now has ${data.totalChunks} chunks total.`, true);
+    loadCorpus();
+  } catch (err) {
+    setStatus(statusEl, 'Request failed: ' + err.message, false);
+  }
+});
+
+// ---- 3. File upload ----------------------------------------------------
+const fileInput = document.getElementById('file-input');
+const filePreview = document.getElementById('file-preview');
+const fileBtn = document.getElementById('file-btn');
+const fileCitation = document.getElementById('file-citation');
+
+fileInput.addEventListener('change', async () => {
+  const file = fileInput.files[0];
+  const statusEl = document.getElementById('file-status');
+  if (!file) return;
+  setStatus(statusEl, 'Reading file…', true);
+  fileBtn.disabled = true;
+  filePreview.value = '';
+
+  try {
+    const name = file.name.toLowerCase();
+    let text = '';
+
+    if (name.endsWith('.pdf')) {
+      const buf = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      const pages = [];
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        pages.push(content.items.map((it) => it.str).join(' '));
+      }
+      text = pages.join('\n\n');
+    } else if (name.endsWith('.html') || name.endsWith('.htm')) {
+      const raw = await file.text();
+      const doc = new DOMParser().parseFromString(raw, 'text/html');
+      doc.querySelectorAll('script, style, nav, header, footer').forEach((el) => el.remove());
+      text = doc.body ? doc.body.innerText : raw;
+    } else {
+      text = await file.text();
+    }
+
+    text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+    filePreview.value = text;
+    if (!fileCitation.value) fileCitation.value = file.name;
+    fileBtn.disabled = !text;
+    setStatus(statusEl, `Extracted ${text.length.toLocaleString()} characters. Review below, then click "Add to corpus".`, true);
+  } catch (err) {
+    setStatus(statusEl, 'Could not read that file: ' + err.message, false);
+  }
+});
+
+fileBtn.addEventListener('click', async () => {
+  const statusEl = document.getElementById('file-status');
+  if (!baseUrl()) return setStatus(statusEl, 'Set the Worker URL above first.', false);
+  const text = filePreview.value.trim();
+  if (!text) return setStatus(statusEl, 'Nothing to add — extract a file first.', false);
+
+  setStatus(statusEl, 'Adding…', true);
+  try {
+    const res = await fetch(baseUrl() + '/ingest/text', {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ text, title: fileCitation.value.trim() || 'Uploaded document', citation: fileCitation.value.trim() }),
+    });
+    const data = await res.json();
+    if (!res.ok) return setStatus(statusEl, 'Error: ' + (data.error || res.status), false);
+    setStatus(statusEl, `Added ${data.added} chunk(s). Corpus now has ${data.totalChunks} chunks total.`, true);
+    loadCorpus();
+  } catch (err) {
+    setStatus(statusEl, 'Request failed: ' + err.message, false);
+  }
+});
+
+// ---- Corpus listing ------------------------------------------------
+async function loadCorpus() {
+  const statusEl = document.getElementById('corpus-status');
+  const listEl = document.getElementById('corpus-list');
+  if (!baseUrl()) return setStatus(statusEl, 'Set the Worker URL above first.', false);
+  setStatus(statusEl, 'Loading…', true);
+  try {
+    const res = await fetch(baseUrl() + '/corpus');
+    const data = await res.json();
+    setStatus(statusEl, `${data.count} chunk(s) indexed.`, true);
+    listEl.innerHTML = data.items
+      .map((it) => `<div class="corpus-row"><strong>${it.citation}</strong> — ${it.title}${it.url ? ` — <a href="${it.url}" target="_blank" rel="noopener">source</a>` : ''}</div>`)
+      .join('');
+  } catch (err) {
+    setStatus(statusEl, 'Request failed: ' + err.message, false);
+  }
+}
+document.getElementById('refresh-btn').addEventListener('click', loadCorpus);
+
+document.getElementById('reset-btn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('corpus-status');
+  if (!baseUrl()) return setStatus(statusEl, 'Set the Worker URL above first.', false);
+  if (!confirm('Reset the corpus back to the small seed set? This removes everything you\'ve added.')) return;
+  try {
+    const res = await fetch(baseUrl() + '/ingest/reset', { method: 'POST', headers: headers() });
+    const data = await res.json();
+    if (!res.ok) return setStatus(statusEl, 'Error: ' + (data.error || res.status), false);
+    setStatus(statusEl, `Reset. Corpus now has ${data.totalChunks} chunks.`, true);
+    loadCorpus();
+  } catch (err) {
+    setStatus(statusEl, 'Request failed: ' + err.message, false);
+  }
+});
+</script>
+</body>
+</html>
