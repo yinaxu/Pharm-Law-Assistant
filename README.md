@@ -5,6 +5,8 @@ chatbot. It answers questions grounded in a knowledge base you build by
 **scraping web pages** or **uploading files** — never from the model's own
 memory — and every answer cites back to its source.
 
+https://yinaxu.github.io/Pharm-Law-Assistant/
+
 **Full setup walkthrough: see [`DEPLOY.md`](DEPLOY.md).** This file just
 covers the architecture.
 
