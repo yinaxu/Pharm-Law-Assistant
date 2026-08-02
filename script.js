@@ -126,23 +126,66 @@ function addQuestion(text) {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
-function addAnswer(answerText, sources, isError = false) {
+function confidenceLabel(level) {
+  switch (level) {
+    case "green": return "High confidence";
+    case "yellow": return "Partial answer";
+    case "red": return "Limited information";
+    default: return null;
+  }
+}
+
+function addAnswer(answerText, sources, confidence, followups, isError = false) {
   const wrap = el("div", "msg msg-answer" + (isError ? " msg-error" : ""));
+
+  const label = !isError ? confidenceLabel(confidence) : null;
+  if (label) {
+    const row = el("div", "answer-row");
+    const badge = document.createElement("span");
+    badge.className = `confidence-badge conf-${confidence}`;
+    badge.textContent = label;
+    row.appendChild(badge);
+    wrap.appendChild(row);
+  }
+
   const answer = el("div", "answer-text", answerText);
   wrap.appendChild(answer);
 
   if (sources && sources.length) {
-    const sourcesRow = el("div", "sources");
+    const panel = el("div", "sources-panel");
+    panel.appendChild(el("div", "sources-title", "Sources"));
     sources.forEach((s, i) => {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "source-row";
+      row.title = "Click to view the exact excerpt";
+      const check = el("span", "source-check", "✓");
+      const num = el("span", "", `[${i + 1}]`);
+      const citation = el("span", "source-citation", s.citation);
+      row.appendChild(check);
+      row.appendChild(num);
+      row.appendChild(citation);
+      row.addEventListener("click", () => openInspector(s));
+      panel.appendChild(row);
+    });
+    wrap.appendChild(panel);
+  }
+
+  if (followups && followups.length) {
+    const panel = el("div", "followups-panel");
+    panel.appendChild(el("div", "followups-title", "Related questions"));
+    followups.forEach((q) => {
       const chip = document.createElement("button");
       chip.type = "button";
-      chip.className = "source-chip";
-      chip.textContent = `[${i + 1}] ${s.citation}`;
-      chip.title = "Click to view the exact excerpt";
-      chip.addEventListener("click", () => openInspector(s));
-      sourcesRow.appendChild(chip);
+      chip.className = "followup-chip";
+      chip.textContent = q;
+      chip.addEventListener("click", () => {
+        chatInput.value = q;
+        chatForm.dispatchEvent(new Event("submit"));
+      });
+      panel.appendChild(chip);
     });
-    wrap.appendChild(sourcesRow);
+    wrap.appendChild(panel);
   }
 
   chatLog.appendChild(wrap);
@@ -217,6 +260,8 @@ async function ask(question) {
     addAnswer(
       "This demo isn't wired up to a live backend yet — the page owner needs to deploy the Worker in /worker and set WORKER_URL in script.js. See DEPLOY.md for the walkthrough.",
       [],
+      null,
+      [],
       true
     );
     chatSubmit.disabled = false;
@@ -236,12 +281,12 @@ async function ask(question) {
     const data = await res.json();
 
     if (!res.ok) {
-      addAnswer(data.error || "Something went wrong on the server.", [], true);
+      addAnswer(data.error || "Something went wrong on the server.", [], null, [], true);
     } else {
-      addAnswer(data.answer, data.sources);
+      addAnswer(data.answer, data.sources, data.confidence, data.followups);
     }
   } catch (err) {
-    addAnswer("Couldn't reach the API. Check your connection and try again.", [], true);
+    addAnswer("Couldn't reach the API. Check your connection and try again.", [], null, [], true);
   } finally {
     chatSubmit.disabled = false;
     demoNote.textContent = "";
