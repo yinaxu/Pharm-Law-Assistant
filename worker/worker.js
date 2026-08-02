@@ -230,8 +230,27 @@ async function extractTextFromHtml(response) {
 // ---------------------------------------------------------------------------
 // Retrieval
 // ---------------------------------------------------------------------------
+// Common words that pass the length>=3 filter but carry no topical meaning.
+// Without this, "the," "are," "for," "what" etc. get counted by raw
+// occurrence count in scoreChunk below — and a long, topically-irrelevant
+// chunk that happens to repeat those words often can out-score a short,
+// genuinely relevant one. That's exactly the failure mode behind "asking
+// about controlled substances in Alaska returns nothing": a long, unrelated
+// Alaska chunk racks up stopword hits plus the jurisdiction bonus, while a
+// short federal chunk that's actually on-topic scores lower and falls out
+// of the top results.
+const STOPWORDS = new Set([
+  "the", "and", "for", "are", "that", "this", "what", "does", "with", "from",
+  "have", "has", "will", "can", "could", "would", "should", "about", "into",
+  "under", "over", "when", "where", "which", "who", "whom", "how", "why",
+  "not", "but", "was", "were", "been", "being", "its", "their", "your",
+  "you", "our", "out", "any", "all", "some", "than", "then", "also", "upon",
+  "per", "each", "such", "these", "those", "there", "here", "just", "only",
+]);
+
 function tokenize(str) {
-  return (str.toLowerCase().match(/[a-z0-9§.]+/g) || []).filter((t) => t.length >= 3);
+  return (str.toLowerCase().match(/[a-z0-9§.]+/g) || [])
+    .filter((t) => t.length >= 3 && !STOPWORDS.has(t));
 }
 
 function scoreChunk(queryTokens, chunk) {
@@ -239,14 +258,15 @@ function scoreChunk(queryTokens, chunk) {
   const jurisdiction = (chunk.jurisdiction || "Federal").toLowerCase();
   let score = 0;
   for (const t of queryTokens) {
-    const hits = haystack.split(t).length - 1;
-    score += hits;
+    // Presence, not frequency — a topic word appearing once still counts
+    // fully, and a chunk can't inflate its score just by being long and
+    // repeating a word many times.
+    if (haystack.includes(t)) score += 1;
     if (chunk.citation.toLowerCase().includes(t)) score += 3;
     if (chunk.title.toLowerCase().includes(t)) score += 1;
-    // Previously jurisdiction wasn't part of the searched text at all, so a
-    // token like "alaska" or "washington" in the question contributed
-    // nothing — it neither found the right state's chunks nor penalized
-    // wrong-state ones. Reward it directly now.
+    // A token like "alaska" or "washington" in the question rewards chunks
+    // actually tagged with that jurisdiction — but only as a tie-breaker on
+    // top of real topical relevance, not a substitute for it.
     if (jurisdiction.includes(t)) score += 2;
   }
   return score;
@@ -261,6 +281,7 @@ function retrieve(corpus, queryTokens, k = 5) {
     .slice(0, k)
     .map((s) => ({ ...s.c, _score: s.score }));
 }
+
 
 // ---------------------------------------------------------------------------
 // Confidence — derived from how strongly retrieval actually matched, not
@@ -348,6 +369,19 @@ const SYNONYMS = {
   supervise: ["supervision"],
   supervising: ["supervision"],
   ratio: ["staffing"],
+  // "Controlled substance" is the umbrella legal term; regulatory text and
+  // everyday questions often use one specific drug-class word instead
+  // ("opioids," "narcotics") without ever saying the umbrella term. Link
+  // them both directions so either phrasing finds the other's chunks.
+  controlled: ["opioid", "opioids", "narcotic", "narcotics", "stimulant", "stimulants", "depressant", "depressants", "hallucinogen", "hallucinogens", "benzodiazepine", "benzodiazepines", "schedule"],
+  opioid: ["controlled", "narcotic", "narcotics", "schedule"],
+  opioids: ["controlled", "narcotic", "narcotics", "schedule"],
+  narcotic: ["controlled", "opioid", "opioids", "schedule"],
+  narcotics: ["controlled", "opioid", "opioids", "schedule"],
+  benzo: ["benzodiazepine", "controlled"],
+  benzos: ["benzodiazepine", "benzodiazepines", "controlled"],
+  stimulant: ["controlled", "schedule"],
+  stimulants: ["controlled", "schedule"],
 };
 
 function expandTokens(tokens) {
@@ -384,6 +418,60 @@ function pickHighlight(chunkText, queryTokens) {
 }
 
 // ---------------------------------------------------------------------------
+// "Did you mean...?" fallback for zero keyword matches.
+//
+// Pure keyword search has a hard ceiling: no amount of hand-written synonyms
+// covers every way someone might phrase a question. Rather than dead-ending
+// on "not found," send the model a bare list of what topics we actually have
+// (titles/citations only — no excerpt text, so this can't be mistaken for a
+// legal answer) and let it map the user's phrasing to the closest real
+// topic, the way a person skimming a table of contents would.
+// ---------------------------------------------------------------------------
+async function suggestRelatedTopics(question, corpus, env) {
+  if (!env.GEMINI_API_KEY || corpus.length === 0) return [];
+
+  const seen = new Map();
+  for (const c of corpus) {
+    const key = `${c.jurisdiction || "Federal"}|${c.citation}|${c.title}`;
+    if (!seen.has(key)) seen.set(key, { jurisdiction: c.jurisdiction || "Federal", citation: c.citation, title: c.title });
+  }
+  const topics = Array.from(seen.values()).slice(0, 60);
+  const topicList = topics.map((t, i) => `${i + 1}. (${t.jurisdiction}) ${t.citation} — ${t.title}`).join("\n");
+
+  const prompt = `A pharmacy-law knowledge base has these topics indexed:\n${topicList}\n\n` +
+    `A user asked: "${question}"\n\n` +
+    `Nothing matched by keyword. If the user's wording plausibly maps to one or more of these topics — ` +
+    `for example, they named a specific drug class ("opioids") that falls under a broader indexed category ` +
+    `("controlled substances"), or used different terminology for the same concept — rewrite their intent as ` +
+    `1-3 short questions phrased close to their own words but pointed at a topic that's actually indexed. ` +
+    `If nothing plausibly relates, return an empty array. ` +
+    `Respond with ONLY a JSON array of strings, nothing else.`;
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 250 },
+        }),
+      }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
+    const match = text.match(/\[[\s\S]*\]/);
+    if (!match) return [];
+    const parsed = JSON.parse(match[0]);
+    return Array.isArray(parsed) ? parsed.filter((q) => typeof q === "string" && q.trim()).slice(0, 3) : [];
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
 // HTTP plumbing
 // ---------------------------------------------------------------------------
 const CORS_HEADERS = {
@@ -413,14 +501,17 @@ async function answerQuestion(question, corpus, env, history = []) {
   const matches = retrieve(corpus, retrievalTokens, 5);
 
   if (matches.length === 0) {
-    return {
-      answer:
-        `That's outside this knowledge base right now (searched ${corpus.length} indexed ` +
+    const suggestions = await suggestRelatedTopics(question, corpus, env);
+    const answer = suggestions.length
+      ? `Nothing matches "${question}" directly by that wording. It might be filed under different terminology — try one of these instead:`
+      : `That's outside this knowledge base right now (searched ${corpus.length} indexed ` +
         `chunk${corpus.length === 1 ? "" : "s"} in scope for this jurisdiction filter). Try ` +
-        `different phrasing, or add a relevant source in the admin panel.`,
+        `different phrasing, or add a relevant source in the admin panel.`;
+    return {
+      answer,
       sources: [],
       confidence: "red",
-      followups: [],
+      followups: suggestions,
     };
   }
 
