@@ -98,18 +98,10 @@ function renderJurisdictionChips(jurisdictions) {
   const label = jurisdictionRow.querySelector(".jurisdiction-label");
   jurisdictionRow.innerHTML = "";
   jurisdictionRow.appendChild(label || el("span", "jurisdiction-label", "Jurisdiction:"));
-  jurisdictions.forEach((j) => {
-    activeJurisdictions.add(j);
 
-    // Federal always applies server-side regardless of this toggle, so
-    // showing it as clickable would be a lie — render it as a fixed badge.
-    if (j === "Federal") {
-      const badge = document.createElement("span");
-      badge.className = "jur-chip jur-fixed";
-      badge.textContent = "Federal (always included)";
-      jurisdictionRow.appendChild(badge);
-      return;
-    }
+  const stateJurisdictions = jurisdictions.filter((j) => j !== "Federal");
+  stateJurisdictions.forEach((j) => {
+    activeJurisdictions.add(j);
 
     const chip = document.createElement("button");
     chip.type = "button";
