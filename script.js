@@ -18,6 +18,7 @@ const inspectorExcerpt = document.getElementById("inspector-excerpt");
 const inspectorLinks = document.getElementById("inspector-links");
 
 let activeJurisdictions = new Set(); // empty = no filter, search everything
+let conversationHistory = []; // session-only, resets on reload — sent back to the API each turn
 
 function el(tag, className, text) {
   const node = document.createElement("div");
@@ -276,6 +277,7 @@ async function ask(question) {
       body: JSON.stringify({
         question,
         jurisdictions: Array.from(activeJurisdictions),
+        history: conversationHistory.slice(-3),
       }),
     });
     const data = await res.json();
@@ -284,6 +286,8 @@ async function ask(question) {
       addAnswer(data.error || "Something went wrong on the server.", [], null, [], true);
     } else {
       addAnswer(data.answer, data.sources, data.confidence, data.followups);
+      conversationHistory.push({ question, answer: data.answer });
+      if (conversationHistory.length > 6) conversationHistory.shift();
     }
   } catch (err) {
     addAnswer("Couldn't reach the API. Check your connection and try again.", [], null, [], true);
