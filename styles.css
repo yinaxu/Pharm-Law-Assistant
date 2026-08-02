@@ -290,6 +290,159 @@ a:hover { color: var(--amber); }
   padding: 0 16px 14px;
 }
 
+.jurisdiction-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 14px;
+  border-bottom: 1px solid var(--panel-dark-line);
+}
+
+.jurisdiction-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #6d7ea3;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.jur-chip {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: #a9b8d6;
+  background: transparent;
+  border: 1px solid var(--panel-dark-line);
+  border-radius: 999px;
+  padding: 4px 11px;
+  cursor: pointer;
+}
+
+.jur-chip.active {
+  border-color: var(--amber);
+  color: #fff;
+  background: rgba(184, 70, 14, 0.25);
+}
+
+.jurisdiction-badge {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 7px;
+  border-radius: 3px;
+  margin-right: 6px;
+}
+
+.jurisdiction-badge.fed {
+  background: rgba(59, 110, 82, 0.2);
+  color: #cfe3d4;
+}
+
+.jurisdiction-badge.state {
+  background: rgba(184, 70, 14, 0.22);
+  color: #f2cdb4;
+}
+
+/* ---------------------------------- source inspector modal --------------- */
+.inspector-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 16, 30, 0.6);
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 100;
+}
+
+.inspector-overlay.open { display: flex; }
+
+.inspector-panel {
+  background: var(--panel-dark);
+  border: 1px solid var(--panel-dark-line);
+  border-radius: var(--radius) var(--radius) 0 0;
+  max-width: 720px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 20px 22px 26px;
+  color: #dbe2ee;
+}
+
+@media (min-width: 720px) {
+  .inspector-overlay { align-items: center; }
+  .inspector-panel { border-radius: var(--radius); max-height: 70vh; }
+}
+
+.inspector-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.inspector-head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  color: #f2f4f9;
+}
+
+.inspector-close {
+  background: transparent;
+  border: 1px solid var(--panel-dark-line);
+  color: #a9b8d6;
+  border-radius: 3px;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  flex: none;
+}
+
+.inspector-meta {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: #8fa0c2;
+  margin: 6px 0 16px;
+}
+
+.inspector-excerpt {
+  border-left: 2px solid var(--amber);
+  padding-left: 14px;
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+.inspector-excerpt mark {
+  background: rgba(184, 70, 14, 0.35);
+  color: #fff;
+  padding: 1px 2px;
+  border-radius: 2px;
+}
+
+.inspector-links {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.inspector-links a {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: #cfe3d4;
+  background: rgba(59, 110, 82, 0.18);
+  border: 1px solid rgba(59, 110, 82, 0.45);
+  border-radius: 999px;
+  padding: 6px 12px;
+  text-decoration: none;
+}
+
+.inspector-links a:hover { color: #fff; }
+
 /* ---------------------------------- section shell ---------------------- */
 section.block {
   padding: 56px 0;

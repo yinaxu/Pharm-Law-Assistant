@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pharmacy Law Assistant — RAG chatbot over federal controlled-substance law</title>
-<meta name="description" content="A retrieval-augmented pharmacy law chatbot: every answer is grounded in real DEA and CFR text, with citations back to the source.">
+<title>Pharmacy Law Assistant — a grounded RAG chatbot for pharmacy law</title>
+<meta name="description" content="A retrieval-augmented pharmacy law chatbot: every answer is grounded in real federal and state regulatory text, with citations back to the exact source.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -19,35 +19,37 @@
       <a href="#demo">Demo</a>
       <a href="#how">How it works</a>
       <a href="#scope">Sources</a>
-     <!-- <a href="#projects">Other projects</a> -->
-      <a href="#about">About</a>
     </nav>
   </div>
 </header>
 
 <main id="top">
   <section class="hero wrap">
-    <p class="eyebrow">RAG project — federal controlled-substances law</p>
+    <p class="eyebrow">RAG project — federal + state pharmacy law</p>
     <h1>A pharmacy law chatbot that shows its work.</h1>
     <p class="lede">
-      Ask it a question about DEA prescription rules and it retrieves the actual regulatory
-      excerpt before it answers — no answer ships without a citation you can click through
-      to eCFR, Cornell LII, or the DEA Diversion Control Division.
+      Ask it a pharmacy law question and it retrieves the actual regulatory text before it
+      answers. Every citation clicks straight through to the real source — eCFR, the DEA
+      Diversion Control Division, or a specific state's own regulations and WACs.
     </p>
     <p class="disclaimer-line">
-      Educational demo only, not legal advice. Scoped to U.S. federal law (21 CFR Part 1306
-      and the Controlled Substances Act) — it does not cover state pharmacy law.
+      Educational demo only, not legal advice. Grounded in federal law (21 CFR Part 1306 and
+      the Controlled Substances Act), with state regulations being added as sources.
     </p>
 
     <div class="demo" id="demo">
       <div class="demo-titlebar">
         <span><span class="dot"></span>retrieval-augmented · live</span>
-        <span id="corpus-count">10 sources indexed</span>
+        <span id="corpus-count">loading…</span>
       </div>
       <div id="chat-log">
         <div class="msg msg-answer">
-          <div class="answer-text">Ask about corresponding responsibility, Schedule II refills, emergency prescriptions, required prescription elements, or the five controlled-substance schedules. I'll answer only from what's actually in the corpus below and cite where each fact comes from.</div>
+          <div class="answer-text">Ask about corresponding responsibility, Schedule II refills, emergency prescriptions, required prescription elements, or the five controlled-substance schedules. I'll answer only from what's actually loaded below and cite where each fact comes from.</div>
         </div>
+      </div>
+      <div class="jurisdiction-row" id="jurisdiction-row">
+        <span class="jurisdiction-label">Jurisdiction:</span>
+        <!-- populated at runtime from /jurisdictions -->
       </div>
       <div class="chip-row">
         <button class="sample-chip" type="button" data-q="Can a pharmacist refill a Schedule II prescription?">Refill a Schedule II script?</button>
@@ -55,7 +57,7 @@
         <button class="sample-chip" type="button" data-q="What has to happen after a doctor calls in an emergency Schedule II prescription?">Emergency oral Rx follow-up?</button>
       </div>
       <form class="demo-form" id="chat-form">
-        <input type="text" id="chat-input" placeholder="Ask a federal pharmacy law question…" autocomplete="off" maxlength="300">
+        <input type="text" id="chat-input" placeholder="Ask a pharmacy law question…" autocomplete="off" maxlength="300">
         <button type="submit" id="chat-submit">Ask</button>
       </form>
       <p class="demo-note" id="demo-note"></p>
@@ -67,105 +69,51 @@
     <h2>How a question becomes a grounded answer</h2>
     <p class="intro">
       No live scraping happens at question time — that's neither reliable nor fast. Instead,
-      a small, hand-verified corpus is pulled from source websites ahead of time, and every
-      answer is constrained to that corpus at query time.
+      sources are added ahead of time through an admin tool, and every answer is limited to
+      what's actually been added.
     </p>
     <div class="clauses">
       <div class="clause">
         <div class="letter">(a)</div>
         <div>
           <h3>Retrieve</h3>
-          <p>The question is tokenized and ranked against corpus excerpts pulled from eCFR, Cornell LII, and DEA Diversion Control pages. This demo uses keyword ranking for transparency; the same slot swaps in vector embeddings without changing anything downstream.</p>
+          <p>The question is matched against stored excerpts from eCFR, the DEA, and state boards of pharmacy, ranked by how closely each excerpt relates to what's being asked.</p>
         </div>
       </div>
       <div class="clause">
         <div class="letter">(b)</div>
         <div>
           <h3>Ground</h3>
-          <p>Only the top-matching excerpts — never the open web, never the model's own memory — are placed in Claude's context, with an explicit instruction to answer from them alone or say the corpus doesn't cover it.</p>
+          <p>Only the best-matching excerpts — never the open web, never the model's own memory — are handed to Google's Gemini 3.5 Flash Lite with an explicit instruction to answer from them alone, or say plainly that nothing loaded so far covers the question.</p>
         </div>
       </div>
       <div class="clause">
         <div class="letter">(c)</div>
         <div>
           <h3>Cite</h3>
-          <p>Every answer returns bracketed citations tied to a real CFR or USC section and a link to the source page, so a pharmacist can verify it in seconds instead of trusting it blind.</p>
+          <p>Every answer returns citations tied to a specific section — not just "somewhere in this document" — and clicking one opens the exact excerpt with the relevant sentence highlighted, plus a link that highlights that same passage on the live source page.</p>
+        </div>
+      </div>
+      <div class="clause">
+        <div class="letter">(d)</div>
+        <div>
+          <h3>Flag conflicts</h3>
+          <p>Every excerpt is tagged with its jurisdiction. When a federal rule and a state rule — or two states — genuinely disagree on the same question, the answer calls it out explicitly and says which one is more restrictive, instead of silently picking one.</p>
         </div>
       </div>
     </div>
   </section>
 
   <section class="block wrap" id="scope">
-    <p class="section-kicker">Current scope</p>
-    <h2>What's actually in the corpus</h2>
+    <p class="section-kicker">Current sources</p>
+    <h2>What's actually loaded right now</h2>
     <p class="intro">
-      Starts with a small seed set covering corresponding responsibility, Schedule II
-      refill/emergency rules, and the five controlled-substance schedules — and grows
-      from there as sources get scraped or uploaded through the admin panel. Current sources include:
+      Starts with a small set covering corresponding responsibility, Schedule II
+      refill/emergency rules, and the five controlled-substance schedules — and grows as
+      sources get added. Every entry below links straight to its original page:
     </p>
-    <div class="source-list">
-      <a class="source-pill" href="https://www.ecfr.gov/current/title-21/chapter-II/part-1306" target="_blank" rel="noopener">ecfr.gov — 21 CFR Part 1306</a>
-      <a class="source-pill" href="https://www.law.cornell.edu/uscode/text/21/812" target="_blank" rel="noopener">law.cornell.edu — LII</a>
-      <a class="source-pill" href="https://www.deadiversion.usdoj.gov/faq/prescriptions-faq.html" target="_blank" rel="noopener">deadiversion.usdoj.gov</a>
-      <a class="source-pill" href="https://www.federalregister.gov" target="_blank" rel="noopener">federalregister.gov</a>
-      <a class="source-pill" href="https://www.ncbop.org" target="_blank" rel="noopener">ncbop.org — pocket card</a>
-    </div>
-  </section>
-<!--
-  <section class="block wrap" id="projects">
-    <p class="section-kicker">Portfolio</p>
-    <h2>Other clinical AI agents in progress</h2>
-    <p class="intro">Part of a broader set of clinical AI agents built to demonstrate applied pharmacy + AI competency.</p>
-    <div class="docket">
-      <div class="docket-row">
-        <div class="no">01</div>
-        <div>
-          <h3>Polypharmacy reconciliation agent</h3>
-          <p>Helps caregivers reconcile medication lists across prescribers and flag interactions.</p>
-        </div>
-      </div>
-      <div class="docket-row">
-        <div class="no">02</div>
-        <div>
-          <h3>OTC / supplement safety assistant</h3>
-          <p>Screens over-the-counter and supplement combinations for interaction and duplication risk.</p>
-        </div>
-      </div>
-      <div class="docket-row">
-        <div class="no">03</div>
-        <div>
-          <h3>Drug shortage finder</h3>
-          <p>Surfaces current shortage status and clinically reasonable alternatives.</p>
-        </div>
-      </div>
-      <div class="docket-row">
-        <div class="no">04</div>
-        <div>
-          <h3>Clinical trial matching agent</h3>
-          <p>Matches patient profiles against active trial eligibility criteria.</p>
-        </div>
-      </div>
-      <div class="docket-row">
-        <div class="no">05</div>
-        <div>
-          <h3>Prior authorization documentation assistant</h3>
-          <p>Two-stage assistant that drafts and then reviews PA documentation before submission.</p>
-        </div>
-      </div>
-    </div>
-  </section>
--->
-
-  <section class="block wrap" id="about">
-    <p class="section-kicker">About</p>
-    <h2>Built by a pharmacist, not just a developer</h2>
-    <div class="about-grid">
-      <p>
-        Yina is a PharmD with multi-state pharmacy licensure (Washington, Nevada, Alaska) and
-        peer-reviewed publications, now building toward healthcare AI automation. This project —
-        and the other agents above — are proof-of-competency builds that sit at the intersection
-        of clinical pharmacy practice and applied AI.
-      </p>
+    <div class="source-list" id="source-list">
+      <span class="jurisdiction-label">loading…</span>
     </div>
   </section>
 </main>
@@ -173,14 +121,26 @@
 <footer class="site-footer">
   <div class="wrap">
     <p class="foot-disclaimer">
-      This tool provides general educational information about U.S. federal controlled-substance
-      law and is not legal advice. It does not cover state-specific pharmacy law, which varies
-      significantly and often imposes additional requirements. Verify anything consequential
-      against the primary source before relying on it.
+      This tool provides general educational information about pharmacy law and is not legal
+      advice. Coverage is limited to whatever sources have actually been added so far — verify
+      anything consequential against the primary source before relying on it, especially
+      anything affecting licensure or compliance decisions.
     </p>
-    <p>§ pharmacy-law-assistant — built as a portfolio / proof-of-competency project · <a href="admin.html">admin</a></p>
+    <p>§ pharmacy-law-assistant · <a href="admin.html">admin</a></p>
   </div>
 </footer>
+
+<div class="inspector-overlay" id="inspector-overlay">
+  <div class="inspector-panel" role="dialog" aria-modal="true" aria-labelledby="inspector-title">
+    <div class="inspector-head">
+      <h3 id="inspector-title">Source</h3>
+      <button class="inspector-close" id="inspector-close" aria-label="Close">✕</button>
+    </div>
+    <div class="inspector-meta" id="inspector-meta"></div>
+    <div class="inspector-excerpt" id="inspector-excerpt"></div>
+    <div class="inspector-links" id="inspector-links"></div>
+  </div>
+</div>
 
 <script src="script.js"></script>
 </body>

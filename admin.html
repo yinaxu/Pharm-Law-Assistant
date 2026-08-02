@@ -62,8 +62,12 @@
     <h2>2. Add a source by URL (scrapes it)</h2>
     <label for="scrape-url">Page URL</label>
     <input type="text" id="scrape-url" placeholder="https://www.ecfr.gov/current/title-21/...">
-    <label for="scrape-citation">Citation label (optional)</label>
-    <input type="text" id="scrape-citation" placeholder="e.g. 21 CFR § 1306.06">
+    <label for="scrape-jurisdiction">Jurisdiction</label>
+    <input type="text" id="scrape-jurisdiction" list="jurisdiction-options" placeholder="Federal" value="Federal">
+    <label for="scrape-prefix">Citation prefix (optional, improves per-section citations)</label>
+    <input type="text" id="scrape-prefix" placeholder="e.g. 21 CFR">
+    <label for="scrape-citation">Fallback citation label (used only if no § section is detected)</label>
+    <input type="text" id="scrape-citation" placeholder="e.g. Washington Board of Pharmacy — general provisions">
     <button id="scrape-btn">Scrape &amp; add</button>
     <div id="scrape-status" class="status"></div>
   </section>
@@ -72,13 +76,24 @@
     <h2>3. Upload a file (.txt, .md, .html, or .pdf)</h2>
     <label for="file-input">File</label>
     <input type="file" id="file-input" accept=".txt,.md,.html,.htm,.pdf">
-    <label for="file-citation">Citation / title label</label>
+    <label for="file-jurisdiction">Jurisdiction</label>
+    <input type="text" id="file-jurisdiction" list="jurisdiction-options" placeholder="Federal" value="Federal">
+    <label for="file-prefix">Citation prefix (optional, improves per-section citations)</label>
+    <input type="text" id="file-prefix" placeholder="e.g. WAC 246-863 or 21 CFR">
+    <label for="file-citation">Fallback citation / title label</label>
     <input type="text" id="file-citation" placeholder="e.g. Washington State Board of Pharmacy — Rule 246-863">
     <label for="file-preview">Extracted text (auto-filled — you can edit before adding)</label>
     <textarea id="file-preview" placeholder="Select a file above…"></textarea>
     <button id="file-btn" disabled>Add to corpus</button>
     <div id="file-status" class="status"></div>
   </section>
+
+  <datalist id="jurisdiction-options">
+    <option value="Federal">
+    <option value="Washington">
+    <option value="Nevada">
+    <option value="Alaska">
+  </datalist>
 
   <section>
     <h2>Currently indexed</h2>
@@ -118,11 +133,16 @@ document.getElementById('scrape-btn').addEventListener('click', async () => {
     const res = await fetch(baseUrl() + '/ingest/url', {
       method: 'POST',
       headers: headers(),
-      body: JSON.stringify({ url, citation: document.getElementById('scrape-citation').value.trim() }),
+      body: JSON.stringify({
+        url,
+        jurisdiction: document.getElementById('scrape-jurisdiction').value.trim() || 'Federal',
+        citationPrefix: document.getElementById('scrape-prefix').value.trim(),
+        citation: document.getElementById('scrape-citation').value.trim(),
+      }),
     });
     const data = await res.json();
     if (!res.ok) return setStatus(statusEl, 'Error: ' + (data.error || res.status), false);
-    setStatus(statusEl, `Added ${data.added} chunk(s) from "${data.title || url}". Corpus now has ${data.totalChunks} chunks total.`, true);
+    setStatus(statusEl, `Added ${data.added} chunk(s) from "${data.title || url}" (${data.specificSections} with a specific § citation). Corpus now has ${data.totalChunks} chunks total.`, true);
     loadCorpus();
   } catch (err) {
     setStatus(statusEl, 'Request failed: ' + err.message, false);
@@ -187,11 +207,17 @@ fileBtn.addEventListener('click', async () => {
     const res = await fetch(baseUrl() + '/ingest/text', {
       method: 'POST',
       headers: headers(),
-      body: JSON.stringify({ text, title: fileCitation.value.trim() || 'Uploaded document', citation: fileCitation.value.trim() }),
+      body: JSON.stringify({
+        text,
+        title: fileCitation.value.trim() || 'Uploaded document',
+        citation: fileCitation.value.trim(),
+        jurisdiction: document.getElementById('file-jurisdiction').value.trim() || 'Federal',
+        citationPrefix: document.getElementById('file-prefix').value.trim(),
+      }),
     });
     const data = await res.json();
     if (!res.ok) return setStatus(statusEl, 'Error: ' + (data.error || res.status), false);
-    setStatus(statusEl, `Added ${data.added} chunk(s). Corpus now has ${data.totalChunks} chunks total.`, true);
+    setStatus(statusEl, `Added ${data.added} chunk(s) (${data.specificSections} with a specific § citation). Corpus now has ${data.totalChunks} chunks total.`, true);
     loadCorpus();
   } catch (err) {
     setStatus(statusEl, 'Request failed: ' + err.message, false);
@@ -209,7 +235,7 @@ async function loadCorpus() {
     const data = await res.json();
     setStatus(statusEl, `${data.count} chunk(s) indexed.`, true);
     listEl.innerHTML = data.items
-      .map((it) => `<div class="corpus-row"><strong>${it.citation}</strong> — ${it.title}${it.url ? ` — <a href="${it.url}" target="_blank" rel="noopener">source</a>` : ''}</div>`)
+      .map((it) => `<div class="corpus-row"><span style="opacity:0.7">[${it.jurisdiction || 'Federal'}]</span> <strong>${it.citation}</strong> — ${it.title}${it.url ? ` — <a href="${it.url}" target="_blank" rel="noopener">source</a>` : ''}</div>`)
       .join('');
   } catch (err) {
     setStatus(statusEl, 'Request failed: ' + err.message, false);

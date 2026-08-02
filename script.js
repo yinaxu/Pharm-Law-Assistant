@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------
-// Point this at your deployed Cloudflare Worker (see worker/README).
+// Point this at your deployed Cloudflare Worker (see DEPLOY.md).
 // Example: "https://pharmlaw-rag-api.<your-subdomain>.workers.dev"
 // ---------------------------------------------------------------------
 const WORKER_URL = "https://pharmlaw-rag-api.pharmdev.workers.dev";
@@ -9,6 +9,15 @@ const chatForm = document.getElementById("chat-form");
 const chatInput = document.getElementById("chat-input");
 const chatSubmit = document.getElementById("chat-submit");
 const demoNote = document.getElementById("demo-note");
+const jurisdictionRow = document.getElementById("jurisdiction-row");
+
+const inspectorOverlay = document.getElementById("inspector-overlay");
+const inspectorTitle = document.getElementById("inspector-title");
+const inspectorMeta = document.getElementById("inspector-meta");
+const inspectorExcerpt = document.getElementById("inspector-excerpt");
+const inspectorLinks = document.getElementById("inspector-links");
+
+let activeJurisdictions = new Set(); // empty = no filter, search everything
 
 function el(tag, className, text) {
   const node = document.createElement("div");
@@ -17,6 +26,100 @@ function el(tag, className, text) {
   return node;
 }
 
+function isConfigured() {
+  return WORKER_URL && !WORKER_URL.includes("YOUR-SUBDOMAIN");
+}
+
+// ---------------------------------------------------------------------
+// Jurisdiction filter chips
+// ---------------------------------------------------------------------
+async function loadJurisdictions() {
+  if (!isConfigured()) return;
+  try {
+    const res = await fetch(`${WORKER_URL}/jurisdictions`);
+    const data = await res.json();
+    renderJurisdictionChips(data.jurisdictions || ["Federal"]);
+  } catch {
+    renderJurisdictionChips(["Federal"]);
+  }
+}
+
+async function loadCorpusCount() {
+  const countEl = document.getElementById("corpus-count");
+  if (!isConfigured()) {
+    countEl.textContent = "demo not configured";
+    return;
+  }
+  try {
+    const res = await fetch(`${WORKER_URL}/corpus`);
+    const data = await res.json();
+    countEl.textContent = `${data.count} chunk${data.count === 1 ? "" : "s"} indexed`;
+  } catch {
+    countEl.textContent = "";
+  }
+}
+
+async function loadSourceList() {
+  const listEl = document.getElementById("source-list");
+  if (!isConfigured()) {
+    listEl.innerHTML = '<span class="jurisdiction-label">Demo not configured yet.</span>';
+    return;
+  }
+  try {
+    const res = await fetch(`${WORKER_URL}/corpus`);
+    const data = await res.json();
+    // De-duplicate down to one entry per (title, url) pair so a document
+    // split into many sections shows once, not once per section.
+    const seen = new Map();
+    for (const item of data.items) {
+      const key = `${item.title}|${item.url}`;
+      if (!seen.has(key)) seen.set(key, item);
+    }
+    const unique = Array.from(seen.values());
+    if (unique.length === 0) {
+      listEl.innerHTML = '<span class="jurisdiction-label">Nothing indexed yet.</span>';
+      return;
+    }
+    listEl.innerHTML = unique
+      .map((item) => {
+        const label = `${item.jurisdiction || "Federal"} — ${item.title}`;
+        return item.url
+          ? `<a class="source-pill" href="${item.url}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`
+          : `<span class="source-pill">${escapeHtml(label)}</span>`;
+      })
+      .join("");
+  } catch {
+    listEl.innerHTML = '<span class="jurisdiction-label">Couldn\'t load sources.</span>';
+  }
+}
+
+function renderJurisdictionChips(jurisdictions) {
+  const label = jurisdictionRow.querySelector(".jurisdiction-label");
+  jurisdictionRow.innerHTML = "";
+  jurisdictionRow.appendChild(label || el("span", "jurisdiction-label", "Jurisdiction:"));
+  jurisdictions.forEach((j) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "jur-chip active";
+    chip.textContent = j;
+    chip.dataset.jurisdiction = j;
+    activeJurisdictions.add(j);
+    chip.addEventListener("click", () => {
+      if (activeJurisdictions.has(j)) {
+        activeJurisdictions.delete(j);
+        chip.classList.remove("active");
+      } else {
+        activeJurisdictions.add(j);
+        chip.classList.add("active");
+      }
+    });
+    jurisdictionRow.appendChild(chip);
+  });
+}
+
+// ---------------------------------------------------------------------
+// Chat rendering
+// ---------------------------------------------------------------------
 function addQuestion(text) {
   const wrap = el("div", "msg msg-question", text);
   chatLog.appendChild(wrap);
@@ -30,14 +133,13 @@ function addAnswer(answerText, sources, isError = false) {
 
   if (sources && sources.length) {
     const sourcesRow = el("div", "sources");
-    sources.forEach((s) => {
-      const chip = document.createElement("a");
+    sources.forEach((s, i) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
       chip.className = "source-chip";
-      chip.href = s.url;
-      chip.target = "_blank";
-      chip.rel = "noopener";
-      chip.textContent = s.citation;
-      chip.title = s.title;
+      chip.textContent = `[${i + 1}] ${s.citation}`;
+      chip.title = "Click to view the exact excerpt";
+      chip.addEventListener("click", () => openInspector(s));
       sourcesRow.appendChild(chip);
     });
     wrap.appendChild(sourcesRow);
@@ -47,13 +149,73 @@ function addAnswer(answerText, sources, isError = false) {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
+// ---------------------------------------------------------------------
+// Source inspector modal
+// ---------------------------------------------------------------------
+function escapeHtml(str) {
+  return str.replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+function openInspector(source) {
+  inspectorTitle.textContent = source.citation;
+
+  const jurClass = source.jurisdiction === "Federal" ? "fed" : "state";
+  inspectorMeta.innerHTML = `<span class="jurisdiction-badge ${jurClass}">${escapeHtml(source.jurisdiction || "Federal")}</span>${escapeHtml(source.title || "")}`;
+
+  let excerptHtml = escapeHtml(source.text || "");
+  if (source.highlight) {
+    const h = escapeHtml(source.highlight);
+    const plain = escapeHtml(source.text || "");
+    if (plain.includes(h)) {
+      excerptHtml = plain.replace(h, `<mark>${h}</mark>`);
+    }
+  }
+  inspectorExcerpt.innerHTML = excerptHtml;
+
+  inspectorLinks.innerHTML = "";
+  if (source.deepLink) {
+    const a = document.createElement("a");
+    a.href = source.deepLink;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = "Open exact passage on source page ↗";
+    inspectorLinks.appendChild(a);
+  } else if (source.url) {
+    const a = document.createElement("a");
+    a.href = source.url;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = "Open source page ↗";
+    inspectorLinks.appendChild(a);
+  }
+
+  inspectorOverlay.classList.add("open");
+}
+
+function closeInspector() {
+  inspectorOverlay.classList.remove("open");
+}
+
+document.getElementById("inspector-close").addEventListener("click", closeInspector);
+inspectorOverlay.addEventListener("click", (e) => {
+  if (e.target === inspectorOverlay) closeInspector();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeInspector();
+});
+
+// ---------------------------------------------------------------------
+// Asking questions
+// ---------------------------------------------------------------------
 async function ask(question) {
   chatSubmit.disabled = true;
   demoNote.textContent = "Retrieving relevant sections…";
 
-  if (!WORKER_URL || WORKER_URL.includes("YOUR-SUBDOMAIN")) {
+  if (!isConfigured()) {
     addAnswer(
-      "This demo isn't wired up to a live backend yet — the page owner needs to deploy the Worker in /worker and set WORKER_URL in script.js. See worker/README for the two-command deploy.",
+      "This demo isn't wired up to a live backend yet — the page owner needs to deploy the Worker in /worker and set WORKER_URL in script.js. See DEPLOY.md for the walkthrough.",
       [],
       true
     );
@@ -66,7 +228,10 @@ async function ask(question) {
     const res = await fetch(WORKER_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({
+        question,
+        jurisdictions: Array.from(activeJurisdictions),
+      }),
     });
     const data = await res.json();
 
@@ -99,3 +264,7 @@ document.querySelectorAll(".sample-chip").forEach((btn) => {
     chatForm.dispatchEvent(new Event("submit"));
   });
 });
+
+loadJurisdictions();
+loadCorpusCount();
+loadSourceList();
