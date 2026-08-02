@@ -430,6 +430,8 @@ function pickHighlight(chunkText, queryTokens) {
 async function suggestRelatedTopics(question, corpus, env) {
   if (!env.GEMINI_API_KEY || corpus.length === 0) return [];
 
+  const GEMINI_MODEL = "gemini-2.0-flash-lite";
+
   const seen = new Map();
   for (const c of corpus) {
     const key = `${c.jurisdiction || "Federal"}|${c.citation}|${c.title}`;
@@ -448,17 +450,21 @@ async function suggestRelatedTopics(question, corpus, env) {
     `Respond with ONLY a JSON array of strings, nothing else.`;
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+        signal: controller.signal,
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 250 },
+          generationConfig: { maxOutputTokens: 180 },
         }),
       }
     );
+    clearTimeout(timeoutId);
     if (!res.ok) return [];
     const data = await res.json();
     const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
@@ -492,13 +498,25 @@ function isAdmin(request, env) {
   return !!env.ADMIN_KEY && key === env.ADMIN_KEY;
 }
 
+function buildFallbackAnswer(question, matches) {
+  const primary = matches[0];
+  const excerpt = (primary?.text || "").replace(/\s+/g, " ").trim();
+  const snippet = excerpt.length > 260 ? `${excerpt.slice(0, 257)}...` : excerpt;
+  const sourceLine = matches
+    .slice(0, 2)
+    .map((m) => `${m.citation} (${m.jurisdiction || "Federal"})`)
+    .join(" • ");
+
+  return `The Gemini API is currently rate-limited, so I’m answering from the indexed sources directly. The closest match appears to be ${primary?.citation || "the available sources"} (${primary?.jurisdiction || "Federal"}): ${snippet || "See the source list below."}\n\nRelevant sources: ${sourceLine}`;
+}
+
 // ---------------------------------------------------------------------------
 // Question answering (Gemini)
 // ---------------------------------------------------------------------------
 async function answerQuestion(question, corpus, env, history = []) {
   const qTokens = tokenize(question);
   const retrievalTokens = buildRetrievalTokens(question, history);
-  const matches = retrieve(corpus, retrievalTokens, 5);
+  const matches = retrieve(corpus, retrievalTokens, 3);
 
   if (matches.length === 0) {
     const suggestions = await suggestRelatedTopics(question, corpus, env);
@@ -516,7 +534,10 @@ async function answerQuestion(question, corpus, env, history = []) {
   }
 
   const contextBlock = matches
-    .map((m, i) => `[${i + 1}] (${m.jurisdiction || "Federal"}) ${m.citation} — ${m.title}\n${m.text}`)
+    .map((m, i) => {
+      const text = (m.text || "").replace(/\s+/g, " ").trim();
+      return `[${i + 1}] (${m.jurisdiction || "Federal"}) ${m.citation} — ${m.title}\n${text.slice(0, 1400)}`;
+    })
     .join("\n\n");
 
   if (!env.GEMINI_API_KEY) {
@@ -525,38 +546,78 @@ async function answerQuestion(question, corpus, env, history = []) {
 
   // Gemini model names change fairly often — check
   // https://ai.google.dev/gemini-api/docs/models if this ever 404s.
-  const GEMINI_MODEL = "gemini-3.5-flash-lite";
+  const GEMINI_MODEL = "gemini-2.0-flash-lite";
 
-  const geminiRes = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": env.GEMINI_API_KEY,
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [
-          // Prior turns, so the model can actually resolve "what about
-          // Alaska?" against what was asked before — not just re-read the
-          // isolated current question.
-          ...history.flatMap((h) => [
-            { role: "user", parts: [{ text: h.question }] },
-            { role: "model", parts: [{ text: h.answer }] },
-          ]),
-          {
-            role: "user",
-            parts: [{ text: `CONTEXT:\n${contextBlock}\n\nQUESTION: ${question}` }],
-          },
-        ],
-        generationConfig: { maxOutputTokens: 800 },
-      }),
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+  let geminiRes;
+  try {
+    geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": env.GEMINI_API_KEY,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          contents: [
+            // Prior turns, so the model can actually resolve "what about
+            // Alaska?" against what was asked before — not just re-read the
+            // isolated current question.
+            ...history.flatMap((h) => [
+              { role: "user", parts: [{ text: h.question }] },
+              { role: "model", parts: [{ text: h.answer }] },
+            ]),
+            {
+              role: "user",
+              parts: [{ text: `CONTEXT:\n${contextBlock}\n\nQUESTION: ${question}` }],
+            },
+          ],
+          generationConfig: { maxOutputTokens: 500 },
+        }),
+      }
+    );
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error?.name === "AbortError") {
+      throw new Error("Upstream API timed out while generating the answer.");
     }
-  );
+    throw error;
+  }
+
+  clearTimeout(timeoutId);
 
   if (!geminiRes.ok) {
     const detail = await geminiRes.text();
+    const isQuotaIssue = geminiRes.status === 429 || detail.includes("RESOURCE_EXHAUSTED") || detail.includes("quota");
+
+    if (isQuotaIssue) {
+      const sources = matches.map((m) => {
+        const highlight = pickHighlight(m.text, qTokens);
+        const deepLink = m.url ? `${m.url}#:~:text=${encodeURIComponent(highlight.slice(0, 150))}` : "";
+        return {
+          citation: m.citation,
+          title: m.title,
+          url: m.url,
+          jurisdiction: m.jurisdiction || "Federal",
+          text: m.text,
+          highlight,
+          deepLink,
+        };
+      });
+
+      return {
+        answer: buildFallbackAnswer(question, matches),
+        sources,
+        confidence: "amber",
+        followups: [],
+      };
+    }
+
     throw new Error(`Upstream API error: ${detail}`);
   }
 
