@@ -1,25 +1,9 @@
 /**
  * Pharmacy Law Assistant — RAG API (v4 Vectorize Engine)
- *
- * Architecture Improvements:
- *   - Semantic Retrieval: Replaced lexical token-matching with Cloudflare Vectorize
- *     and Workers AI (@cf/baai/bge-small-en-v1.5) embeddings.
- *   - Section-aware splitting remains intact to maintain section-level citations.
- *   - Dual Storage Pattern:
- *       1. High-dimensional vectors are indexed in env.VECTOR_INDEX (Vectorize).
- *       2. Structural chunk metadata and raw text remain in env.CORPUS_KV.
- *
- * Endpoints:
- *   POST /              — ask a question. Body: { question, jurisdictions? }
- *   POST /ingest/url     — [admin] scrape a page. Body: { url, jurisdiction?, citationPrefix?, citation? }
- *   POST /ingest/text    — [admin] store text. Body: { text, title, jurisdiction?, citationPrefix?, citation?, sourceUrl? }
- *   POST /ingest/reset   — [admin] wipe back to seed corpus
- *   GET  /corpus         — public listing of indexed chunks
- *   GET  /jurisdictions  — public list of indexed jurisdictions
  */
 
 // ---------------------------------------------------------------------------
-// Seed Corpus (Default fallback prior to dynamic vector ingestion)
+// Seed Corpus
 // ---------------------------------------------------------------------------
 const SEED_CORPUS = [
   {
@@ -76,8 +60,33 @@ one of them.
   where [...] is a JSON array of 2-3 short, specific follow-up questions.`;
 
 // ---------------------------------------------------------------------------
-// Text Processing & Chunking Utilities
+// ID & Text Processing Utilities
 // ---------------------------------------------------------------------------
+
+/**
+ * Guarantees ANY vector ID stays strictly <= 64 bytes for Cloudflare Vectorize.
+ */
+function sanitizeVectorId(id) {
+  if (!id) return `vec-${Date.now()}`;
+  if (id.length <= 64) return id;
+
+  const prefix = id.slice(0, 48);
+  const hash = Math.abs(
+    id.split("").reduce((acc, char) => (acc << 5) - acc + char.charCodeAt(0), 0)
+  ).toString(36);
+
+  return `${prefix}-${hash}`.slice(0, 64);
+}
+
+function slugify(s) {
+  return (s || "source")
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 30); // Capped short so initial IDs rarely exceed limits
+}
+
 const SECTION_PATTERN = /§\s?(\d{2,4}(?:\.\d{1,4})?[a-z]?)/g;
 
 function splitIntoSections(text) {
@@ -124,7 +133,7 @@ function buildEntries(rawText, { idBase, title, url, jurisdiction, citationPrefi
         ? `${citationPrefix ? citationPrefix + " " : ""}§ ${sec.sectionNumber}`
         : fallbackCitation || title || url || "Uploaded source";
       entries.push({
-        id: `${idBase}-${sIdx}-${i}`,
+        id: sanitizeVectorId(`${idBase}-${sIdx}-${i}`),
         citation,
         title: title || url || "Uploaded source",
         url: url || "",
@@ -135,15 +144,6 @@ function buildEntries(rawText, { idBase, title, url, jurisdiction, citationPrefi
     sIdx++;
   }
   return entries;
-}
-
-function slugify(s) {
-  return (s || "source")
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")
-    .slice(0, 60);
 }
 
 async function extractTextFromHtml(response) {
@@ -169,50 +169,75 @@ async function extractTextFromHtml(response) {
 // KV and Vectorize Storage Logic
 // ---------------------------------------------------------------------------
 async function loadCorpus(env) {
-  if (!env.CORPUS_KV) return SEED_CORPUS;
+  if (!env.CORPUS_KV) return SEED_CORPUS.map(c => ({ ...c, id: sanitizeVectorId(c.id) }));
   const stored = await env.CORPUS_KV.get("corpus", "json");
-  return stored && stored.length ? stored : SEED_CORPUS;
+  const rawList = stored && stored.length ? stored : SEED_CORPUS;
+  // Always sanitize stored IDs when loaded
+  return rawList.map(item => ({
+    ...item,
+    id: sanitizeVectorId(item.id)
+  }));
 }
 
 /**
- * Embeds documents using Workers AI and stores vectors in Vectorize while
- * writing the document corpus to Workers KV.
+ * Embeds documents in batches using Workers AI and upserts vectors into Vectorize.
  */
 async function ingestEntries(entries, env) {
+  if (!entries || entries.length === 0) return;
+
+  // Sanitize all entry IDs before processing
+  const sanitizedEntries = entries.map((entry) => ({
+    ...entry,
+    id: sanitizeVectorId(entry.id),
+  }));
+
   if (!env.VECTOR_INDEX || !env.AI) {
-    // Fallback if Vectorize/Workers AI binding isn't active
     const corpus = await loadCorpus(env);
     const byId = new Map(corpus.map((c) => [c.id, c]));
-    for (const entry of entries) byId.set(entry.id, entry);
+    for (const entry of sanitizedEntries) byId.set(entry.id, entry);
     const updated = Array.from(byId.values());
     await env.CORPUS_KV.put("corpus", JSON.stringify(updated));
     return;
   }
 
-  const vectorsToInsert = [];
-  for (const entry of entries) {
-    // Generate text embedding vector (384 dimensions)
-    const textToEmbed = `${entry.citation} ${entry.title} ${entry.text}`;
-    const embedding = await env.AI.run("@cf/baai/bge-small-en-v1.5", { text: textToEmbed });
+  const BATCH_SIZE = 500; // Keeps total subrequests safely under Cloudflare's 50 limit
 
-    vectorsToInsert.push({
-      id: entry.id,
-      values: embedding.data[0],
-      metadata: {
-        citation: entry.citation,
-        title: entry.title,
-        jurisdiction: entry.jurisdiction,
-      },
+  for (let i = 0; i < sanitizedEntries.length; i += BATCH_SIZE) {
+    const chunk = sanitizedEntries.slice(i, i + BATCH_SIZE);
+
+    const textInputs = chunk.map(
+      (entry) => `${entry.citation || ""} ${entry.title || ""} ${entry.text || ""}`
+    );
+
+    const embeddingsResponse = await env.AI.run("@cf/baai/bge-small-en-v1.5", {
+      text: textInputs,
     });
+
+    const embeddingsData = embeddingsResponse.data;
+
+    const vectorsToUpsert = chunk.map((entry, idx) => {
+      const values = Array.isArray(embeddingsData[0])
+        ? embeddingsData[idx]
+        : embeddingsData;
+
+      return {
+        id: entry.id, // Strictly <= 64 bytes
+        values: values,
+        metadata: {
+          citation: entry.citation || "",
+          title: entry.title || "",
+          jurisdiction: entry.jurisdiction || "Federal",
+        },
+      };
+    });
+
+    await env.VECTOR_INDEX.upsert(vectorsToUpsert);
   }
 
-  // 1. Store vectors in Vectorize
-  await env.VECTOR_INDEX.insert(vectorsToInsert);
-
-  // 2. Persist full document map in KV
+  // Persist updated document map back to KV
   const corpus = await loadCorpus(env);
   const byId = new Map(corpus.map((c) => [c.id, c]));
-  for (const entry of entries) byId.set(entry.id, entry);
+  for (const entry of sanitizedEntries) byId.set(entry.id, entry);
   const updatedCorpus = Array.from(byId.values());
 
   await env.CORPUS_KV.put("corpus", JSON.stringify(updatedCorpus));
@@ -222,15 +247,12 @@ async function ingestEntries(entries, env) {
 // Semantic Retrieval via Vector Similarity
 // ---------------------------------------------------------------------------
 async function retrieveContext(queryText, corpus, env, jurisdictions = []) {
-  // Fallback to lexical search if Vectorize binding is absent
   if (!env.VECTOR_INDEX || !env.AI) {
     return corpus.slice(0, 5);
   }
 
-  // 1. Embed incoming user query
   const queryEmbedding = await env.AI.run("@cf/baai/bge-small-en-v1.5", { text: queryText });
 
-  // 2. Query Vectorize
   const matches = await env.VECTOR_INDEX.query(queryEmbedding.data[0], {
     topK: 8,
     returnMetadata: true,
@@ -240,7 +262,6 @@ async function retrieveContext(queryText, corpus, env, jurisdictions = []) {
     return [];
   }
 
-  // 3. Map returned vector IDs back to KV stored corpus
   const corpusMap = new Map(corpus.map((item) => [item.id, item]));
   const allowedJurisdictions = jurisdictions.length
     ? new Set([...jurisdictions, "Federal"])
@@ -334,7 +355,7 @@ async function answerQuestion(question, corpus, env, history = [], jurisdictions
     throw new Error("Server misconfigured: GEMINI_API_KEY secret is not set.");
   }
 
-  const GEMINI_MODEL = "gemini-1.5-flash";
+  const GEMINI_MODEL = "gemini-3.5-flash-lite"; // or "gemini-3.5-turbo" for a faster, cheaper model
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${env.GEMINI_API_KEY}`,
@@ -435,6 +456,24 @@ export default {
       const corpus = await loadCorpus(env);
       const set = new Set(corpus.map((c) => c.jurisdiction || "Federal"));
       return json({ jurisdictions: Array.from(set).sort() });
+    }
+
+    // Reindex route — [admin] re-embed KV corpus into Vectorize
+    if (url.pathname === "/ingest/reindex" && request.method === "POST") {
+      if (!isAdmin(request, env)) return json({ error: "Unauthorized" }, 401);
+
+      try {
+        const corpus = await loadCorpus(env);
+        await ingestEntries(corpus, env);
+
+        return json({ 
+          ok: true, 
+          message: `Successfully indexed ${corpus.length} documents into Vectorize!` 
+        });
+      } catch (err) {
+        console.error("Reindex Error:", err);
+        return json({ error: "Reindex failed", details: err.message }, 500);
+      }
     }
 
     // Ingest URL route
