@@ -1,3 +1,10 @@
 worker/
 Source_PDFs/
 *.pdf
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example

@@ -64,6 +64,33 @@ one of them.
 // ---------------------------------------------------------------------------
 
 /**
+ * Removes every existing chunk tied to a given source (matched by sourceKey
+ * — a stable URL, or jurisdiction+title for uploads) before new chunks for
+ * that same source are added. Without this, re-uploading a revised version
+ * of a document just piles new chunks on top of the stale old ones, since
+ * each upload's chunk IDs are unique. This is what makes "re-upload to
+ * update a law" actually replace instead of duplicate.
+ */
+async function replaceSource(sourceKey, env) {
+  if (!sourceKey) return 0;
+  const corpus = await loadCorpus(env);
+  const stale = corpus.filter((c) => c.sourceKey === sourceKey);
+  if (stale.length === 0) return 0;
+
+  const remaining = corpus.filter((c) => c.sourceKey !== sourceKey);
+  await env.CORPUS_KV.put("corpus", JSON.stringify(remaining));
+
+  if (env.VECTOR_INDEX) {
+    try {
+      await env.VECTOR_INDEX.deleteByIds(stale.map((c) => c.id));
+    } catch (err) {
+      console.error("Vectorize delete failed during replace:", err);
+    }
+  }
+  return stale.length;
+}
+
+/**
  * Guarantees ANY vector ID stays strictly <= 64 bytes for Cloudflare Vectorize.
  */
 function sanitizeVectorId(id) {
@@ -87,19 +114,25 @@ function slugify(s) {
     .slice(0, 30); // Capped short so initial IDs rarely exceed limits
 }
 
-const SECTION_PATTERN = /§\s?(\d{2,4}(?:\.\d{1,4})?[a-z]?)/g;
+// Different jurisdictions cite sections completely differently: federal CFR
+// uses "§ 1306.11", Alaska Statutes use "AS 08.80.168" or "Sec. 08.80.168",
+// Washington uses "RCW 18.64.005" or "WAC 246-863-030" (hyphens, not dots),
+// Nevada uses "NRS 639.070". Matching only "§" meant every state document
+// fell back to one generic label for the whole upload. This catches the
+// common formats so per-section citations work across jurisdictions too.
+const SECTION_PATTERN = /(?<![A-Za-z])(AS|RCW|WAC|NRS|NAC|AAC|§|Sec\.?|Section)\s?(\d{1,4}[.\-]\d{1,4}(?:[.\-]\d{1,4})?[a-z]?)/gi;
 
 function splitIntoSections(text) {
   const matches = [...text.matchAll(SECTION_PATTERN)];
-  if (matches.length < 1) return [{ sectionNumber: null, body: text }];
+  if (matches.length < 1) return [{ sectionNumber: null, prefix: null, body: text }];
   const sections = [];
   if (matches[0].index > 0) {
-    sections.push({ sectionNumber: null, body: text.slice(0, matches[0].index) });
+    sections.push({ sectionNumber: null, prefix: null, body: text.slice(0, matches[0].index) });
   }
   for (let i = 0; i < matches.length; i++) {
     const start = matches[i].index;
     const end = i + 1 < matches.length ? matches[i + 1].index : text.length;
-    sections.push({ sectionNumber: matches[i][1], body: text.slice(start, end) });
+    sections.push({ sectionNumber: matches[i][2], prefix: matches[i][1], body: text.slice(start, end) });
   }
   return sections.filter((s) => s.body.trim().length > 30);
 }
@@ -122,22 +155,33 @@ function chunkText(rawText, { maxLen = 900, overlap = 150, minLen = 60 } = {}) {
   return chunks;
 }
 
-function buildEntries(rawText, { idBase, title, url, jurisdiction, citationPrefix, fallbackCitation }) {
+function buildEntries(rawText, { idBase, title, url, jurisdiction, citationPrefix, fallbackCitation, sourceKey }) {
   const sections = splitIntoSections(rawText);
   const entries = [];
   let sIdx = 0;
+  const GENERIC_MARKERS = new Set(["§", "sec", "sec.", "section"]);
   for (const sec of sections) {
     const pieces = chunkText(sec.body);
     for (let i = 0; i < pieces.length; i++) {
-      const citation = sec.sectionNumber
-        ? `${citationPrefix ? citationPrefix + " " : ""}§ ${sec.sectionNumber}`
-        : fallbackCitation || title || url || "Uploaded source";
+      let citation;
+      if (sec.sectionNumber && sec.prefix && !GENERIC_MARKERS.has(sec.prefix.toLowerCase())) {
+        // A real code prefix was found right in the text (e.g. "AS 08.80.168",
+        // "RCW 18.64.005") — use it as-is, it's already a complete citation.
+        citation = `${sec.prefix.toUpperCase()} ${sec.sectionNumber}`;
+      } else if (sec.sectionNumber) {
+        // Only a generic marker ("§", "Sec.") was found — compose with
+        // whatever prefix the admin panel supplied for this upload.
+        citation = `${citationPrefix ? citationPrefix + " " : ""}§ ${sec.sectionNumber}`;
+      } else {
+        citation = fallbackCitation || title || url || "Uploaded source";
+      }
       entries.push({
         id: sanitizeVectorId(`${idBase}-${sIdx}-${i}`),
         citation,
         title: title || url || "Uploaded source",
         url: url || "",
         jurisdiction: jurisdiction || "Federal",
+        sourceKey: sourceKey || url || slugify(title),
         text: pieces[i],
       });
     }
@@ -491,6 +535,9 @@ export default {
       const { text, title } = await extractTextFromHtml(pageRes);
       if (!text || text.length < 100) return json({ error: "Insufficient text found." }, 422);
 
+      const sourceKey = targetUrl;
+      const replaced = await replaceSource(sourceKey, env);
+
       const additions = buildEntries(text, {
         idBase: slugify(targetUrl),
         title,
@@ -498,12 +545,13 @@ export default {
         jurisdiction: body.jurisdiction || "Federal",
         citationPrefix: body.citationPrefix || "",
         fallbackCitation: body.citation || "",
+        sourceKey,
       });
 
       await ingestEntries(additions, env);
       const corpus = await loadCorpus(env);
 
-      return json({ added: additions.length, totalChunks: corpus.length, title });
+      return json({ added: additions.length, replaced, totalChunks: corpus.length, title });
     }
 
     // Ingest Text route
@@ -514,6 +562,9 @@ export default {
       if (!text) return json({ error: 'Missing "text"' }, 400);
 
       const title = body.title || "Uploaded document";
+      const sourceKey = `${(body.jurisdiction || "Federal").toLowerCase()}::${slugify(title)}`;
+      const replaced = await replaceSource(sourceKey, env);
+
       const additions = buildEntries(text, {
         idBase: `${slugify(title)}-${Date.now()}`,
         title,
@@ -521,12 +572,13 @@ export default {
         jurisdiction: body.jurisdiction || "Federal",
         citationPrefix: body.citationPrefix || "",
         fallbackCitation: body.citation || "",
+        sourceKey,
       });
 
       await ingestEntries(additions, env);
       const corpus = await loadCorpus(env);
 
-      return json({ added: additions.length, totalChunks: corpus.length });
+      return json({ added: additions.length, replaced, totalChunks: corpus.length });
     }
 
     // Reset Corpus route
