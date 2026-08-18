@@ -37,6 +37,20 @@
   .status { margin-top:10px; font-family:"IBM Plex Mono",monospace; font-size:12.5px; white-space:pre-wrap; }
   .status.ok { color:var(--ok); }
   .status.err { color:var(--err); }
+  .status.log { max-height:220px; overflow-y:auto; border-top:1px solid var(--line); padding-top:8px; }
+  .status.log div.ok { color:var(--ok); }
+  .status.log div.err { color:var(--err); }
+  .status.log div.pending { color:var(--ink-soft); }
+  #batch-list { margin-top:12px; }
+  .batch-row { border-top:1px solid var(--line); padding:10px 0; }
+  .batch-row:first-child { border-top:none; padding-top:0; }
+  .batch-row-head { display:flex; justify-content:space-between; gap:10px; font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-soft); }
+  .batch-row-head .fname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .batch-row input[type=text] { margin-top:6px; font-size:0.9rem; }
+  .batch-row details { margin-top:6px; }
+  .batch-row summary { font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--ink-soft); cursor:pointer; }
+  .batch-row textarea { min-height:70px; margin-top:6px; }
+  .batch-row .remove-file { margin-top:6px; padding:5px 10px; font-size:11px; }
   .corpus-list { font-family:"IBM Plex Mono",monospace; font-size:12px; }
   .corpus-row { padding:8px 0; border-top:1px solid var(--line); }
   .corpus-row:first-child { border-top:none; }
@@ -62,30 +76,24 @@
     <h2>2. Add a source by URL (scrapes it)</h2>
     <label for="scrape-url">Page URL</label>
     <input type="text" id="scrape-url" placeholder="https://www.ecfr.gov/current/title-21/...">
-    <label for="scrape-jurisdiction">Jurisdiction</label>
-    <input type="text" id="scrape-jurisdiction" list="jurisdiction-options" placeholder="Federal" value="Federal">
-    <label for="scrape-prefix">Citation prefix (optional, improves per-section citations)</label>
-    <input type="text" id="scrape-prefix" placeholder="e.g. 21 CFR">
-    <label for="scrape-citation">Fallback citation label (used only if no § section is detected)</label>
-    <input type="text" id="scrape-citation" placeholder="e.g. Washington Board of Pharmacy — general provisions">
+    <label for="scrape-citation">Citation label (optional)</label>
+    <input type="text" id="scrape-citation" placeholder="e.g. 21 CFR § 1306.06">
     <button id="scrape-btn">Scrape &amp; add</button>
     <div id="scrape-status" class="status"></div>
   </section>
 
   <section>
-    <h2>3. Upload a file (.txt, .md, .html, or .pdf)</h2>
-    <label for="file-input">File</label>
-    <input type="file" id="file-input" accept=".txt,.md,.html,.htm,.pdf">
-    <label for="file-jurisdiction">Jurisdiction</label>
-    <input type="text" id="file-jurisdiction" list="jurisdiction-options" placeholder="Federal" value="Federal">
-    <label for="file-prefix">Citation prefix (optional, improves per-section citations)</label>
-    <input type="text" id="file-prefix" placeholder="e.g. WAC 246-863 or 21 CFR">
-    <label for="file-citation">Fallback citation / title label</label>
-    <input type="text" id="file-citation" placeholder="e.g. Washington State Board of Pharmacy — Rule 246-863">
-    <label for="file-preview">Extracted text (auto-filled — you can edit before adding)</label>
-    <textarea id="file-preview" placeholder="Select a file above…"></textarea>
-    <button id="file-btn" disabled>Add to corpus</button>
-    <div id="file-status" class="status"></div>
+    <h2>3. Upload files (.txt, .md, .html, or .pdf — one or many at once)</h2>
+    <label for="file-input">Files</label>
+    <input type="file" id="file-input" accept=".txt,.md,.html,.htm,.pdf" multiple>
+    <label for="batch-jurisdiction">Jurisdiction (applies to this whole batch)</label>
+    <input type="text" id="batch-jurisdiction" list="jurisdiction-options" placeholder="Federal" value="Federal">
+    <label for="batch-prefix">Citation prefix (optional — e.g. "RCW", "AS", "21 CFR")</label>
+    <input type="text" id="batch-prefix" placeholder="Leave blank if the document text already includes its own citation prefix">
+    <p class="worker-config">Titles are auto-filled from each filename — edit any of them below before adding. Re-uploading a file with the same title + jurisdiction replaces its old version instead of duplicating it.</p>
+    <div id="batch-list"></div>
+    <button id="batch-btn" disabled>Add all to corpus</button>
+    <div id="file-status" class="status log"></div>
   </section>
 
   <datalist id="jurisdiction-options">
@@ -133,95 +141,177 @@ document.getElementById('scrape-btn').addEventListener('click', async () => {
     const res = await fetch(baseUrl() + '/ingest/url', {
       method: 'POST',
       headers: headers(),
-      body: JSON.stringify({
-        url,
-        jurisdiction: document.getElementById('scrape-jurisdiction').value.trim() || 'Federal',
-        citationPrefix: document.getElementById('scrape-prefix').value.trim(),
-        citation: document.getElementById('scrape-citation').value.trim(),
-      }),
+      body: JSON.stringify({ url, citation: document.getElementById('scrape-citation').value.trim() }),
     });
     const data = await res.json();
     if (!res.ok) return setStatus(statusEl, 'Error: ' + (data.error || res.status), false);
-    setStatus(statusEl, `Added ${data.added} chunk(s) from "${data.title || url}" (${data.specificSections} with a specific § citation). Corpus now has ${data.totalChunks} chunks total.`, true);
+    setStatus(statusEl, `Added ${data.added} chunk(s) from "${data.title || url}". Corpus now has ${data.totalChunks} chunks total.`, true);
     loadCorpus();
   } catch (err) {
     setStatus(statusEl, 'Request failed: ' + err.message, false);
   }
 });
 
-// ---- 3. File upload ----------------------------------------------------
+// ---- 3. Batch file upload ----------------------------------------------
 const fileInput = document.getElementById('file-input');
-const filePreview = document.getElementById('file-preview');
-const fileBtn = document.getElementById('file-btn');
-const fileCitation = document.getElementById('file-citation');
+const batchList = document.getElementById('batch-list');
+const batchBtn = document.getElementById('batch-btn');
+const batchJurisdiction = document.getElementById('batch-jurisdiction');
+const batchPrefix = document.getElementById('batch-prefix');
+
+let batchFiles = []; // [{ name, title, text, error }]
+
+function titleFromFilename(name) {
+  return name.replace(/\.(txt|md|html?|pdf)$/i, '').replace(/[_-]+/g, ' ').trim();
+}
+
+async function extractText(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.pdf')) {
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    const pages = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      pages.push(content.items.map((it) => it.str).join(' '));
+    }
+    return pages.join('\n\n');
+  }
+  if (name.endsWith('.html') || name.endsWith('.htm')) {
+    const raw = await file.text();
+    const doc = new DOMParser().parseFromString(raw, 'text/html');
+    doc.querySelectorAll('script, style, nav, header, footer').forEach((el) => el.remove());
+    return doc.body ? doc.body.innerText : raw;
+  }
+  return file.text();
+}
+
+function renderBatchList() {
+  batchList.innerHTML = batchFiles
+    .map((f, i) => `
+      <div class="batch-row" data-index="${i}">
+        <div class="batch-row-head">
+          <span class="fname">${f.error ? '⚠ ' : ''}${f.name}</span>
+          <span>${f.error ? f.error : f.text.length.toLocaleString() + ' chars'}</span>
+        </div>
+        <input type="text" class="batch-title" data-index="${i}" value="${f.title.replace(/"/g, '&quot;')}" ${f.error ? 'disabled' : ''}>
+        ${f.error ? '' : `
+        <details>
+          <summary>Preview / edit extracted text</summary>
+          <textarea class="batch-text" data-index="${i}">${f.text}</textarea>
+        </details>`}
+        <button type="button" class="secondary remove-file" data-index="${i}">Remove</button>
+      </div>
+    `)
+    .join('');
+
+  batchList.querySelectorAll('.batch-title').forEach((input) => {
+    input.addEventListener('input', (e) => {
+      batchFiles[+e.target.dataset.index].title = e.target.value;
+    });
+  });
+  batchList.querySelectorAll('.batch-text').forEach((ta) => {
+    ta.addEventListener('input', (e) => {
+      batchFiles[+e.target.dataset.index].text = e.target.value;
+    });
+  });
+  batchList.querySelectorAll('.remove-file').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      batchFiles.splice(+e.target.dataset.index, 1);
+      renderBatchList();
+      updateBatchButton();
+    });
+  });
+}
+
+function updateBatchButton() {
+  const ready = batchFiles.filter((f) => !f.error && f.text.trim());
+  batchBtn.disabled = ready.length === 0;
+  batchBtn.textContent = ready.length ? `Add all ${ready.length} to corpus` : 'Add all to corpus';
+}
 
 fileInput.addEventListener('change', async () => {
-  const file = fileInput.files[0];
   const statusEl = document.getElementById('file-status');
-  if (!file) return;
-  setStatus(statusEl, 'Reading file…', true);
-  fileBtn.disabled = true;
-  filePreview.value = '';
+  const files = Array.from(fileInput.files);
+  if (!files.length) return;
 
-  try {
-    const name = file.name.toLowerCase();
-    let text = '';
+  statusEl.className = 'status';
+  setStatus(statusEl, `Reading ${files.length} file(s)…`, true);
+  batchFiles = [];
 
-    if (name.endsWith('.pdf')) {
-      const buf = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-      const pages = [];
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        pages.push(content.items.map((it) => it.str).join(' '));
-      }
-      text = pages.join('\n\n');
-    } else if (name.endsWith('.html') || name.endsWith('.htm')) {
-      const raw = await file.text();
-      const doc = new DOMParser().parseFromString(raw, 'text/html');
-      doc.querySelectorAll('script, style, nav, header, footer').forEach((el) => el.remove());
-      text = doc.body ? doc.body.innerText : raw;
-    } else {
-      text = await file.text();
+  for (const file of files) {
+    try {
+      let text = await extractText(file);
+      text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+      batchFiles.push({ name: file.name, title: titleFromFilename(file.name), text, error: text ? null : 'No text extracted' });
+    } catch (err) {
+      batchFiles.push({ name: file.name, title: titleFromFilename(file.name), text: '', error: err.message });
     }
-
-    text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-    filePreview.value = text;
-    if (!fileCitation.value) fileCitation.value = file.name;
-    fileBtn.disabled = !text;
-    setStatus(statusEl, `Extracted ${text.length.toLocaleString()} characters. Review below, then click "Add to corpus".`, true);
-  } catch (err) {
-    setStatus(statusEl, 'Could not read that file: ' + err.message, false);
   }
+
+  renderBatchList();
+  updateBatchButton();
+  const okCount = batchFiles.filter((f) => !f.error).length;
+  setStatus(statusEl, `Extracted ${okCount}/${files.length} file(s). Review titles below, then click "Add all to corpus".`, okCount === files.length);
 });
 
-fileBtn.addEventListener('click', async () => {
+batchBtn.addEventListener('click', async () => {
   const statusEl = document.getElementById('file-status');
   if (!baseUrl()) return setStatus(statusEl, 'Set the Worker URL above first.', false);
-  const text = filePreview.value.trim();
-  if (!text) return setStatus(statusEl, 'Nothing to add — extract a file first.', false);
 
-  setStatus(statusEl, 'Adding…', true);
-  try {
-    const res = await fetch(baseUrl() + '/ingest/text', {
-      method: 'POST',
-      headers: headers(),
-      body: JSON.stringify({
-        text,
-        title: fileCitation.value.trim() || 'Uploaded document',
-        citation: fileCitation.value.trim(),
-        jurisdiction: document.getElementById('file-jurisdiction').value.trim() || 'Federal',
-        citationPrefix: document.getElementById('file-prefix').value.trim(),
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) return setStatus(statusEl, 'Error: ' + (data.error || res.status), false);
-    setStatus(statusEl, `Added ${data.added} chunk(s) (${data.specificSections} with a specific § citation). Corpus now has ${data.totalChunks} chunks total.`, true);
-    loadCorpus();
-  } catch (err) {
-    setStatus(statusEl, 'Request failed: ' + err.message, false);
+  const jurisdiction = batchJurisdiction.value.trim() || 'Federal';
+  const citationPrefix = batchPrefix.value.trim();
+  const ready = batchFiles.filter((f) => !f.error && f.text.trim());
+
+  statusEl.className = 'status log';
+  statusEl.innerHTML = '';
+  batchBtn.disabled = true;
+
+  let okCount = 0;
+  for (const f of ready) {
+    const line = document.createElement('div');
+    line.className = 'pending';
+    line.textContent = `… ${f.name}`;
+    statusEl.appendChild(line);
+    statusEl.scrollTop = statusEl.scrollHeight;
+
+    try {
+      const res = await fetch(baseUrl() + '/ingest/text', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({
+          text: f.text,
+          title: f.title || f.name,
+          citation: f.title || f.name,
+          jurisdiction,
+          citationPrefix,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        line.className = 'err';
+        line.textContent = `✗ ${f.name} — ${data.error || res.status}`;
+      } else {
+        line.className = 'ok';
+        const replacedNote = data.replaced ? `, replaced ${data.replaced} old chunk(s)` : '';
+        line.textContent = `✓ ${f.name} — ${data.added} chunk(s) added${replacedNote}`;
+        okCount++;
+      }
+    } catch (err) {
+      line.className = 'err';
+      line.textContent = `✗ ${f.name} — ${err.message}`;
+    }
   }
+
+  const summary = document.createElement('div');
+  summary.className = okCount === ready.length ? 'ok' : 'err';
+  summary.textContent = `Done: ${okCount}/${ready.length} file(s) added successfully.`;
+  statusEl.appendChild(summary);
+  statusEl.scrollTop = statusEl.scrollHeight;
+
+  batchBtn.disabled = false;
+  loadCorpus();
 });
 
 // ---- Corpus listing ------------------------------------------------

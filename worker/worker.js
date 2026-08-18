@@ -137,6 +137,45 @@ function splitIntoSections(text) {
   return sections.filter((s) => s.body.trim().length > 30);
 }
 
+// Within one section, statutes are almost always further broken into
+// numbered/lettered subsections — "(1)", "(2)", "(a)", "(iii)" — each
+// starting a new clause. Splitting on these turns "RCW 18.64.005" into
+// "RCW 18.64.005(2)", "RCW 18.64.005(3)(a)", etc., so a citation points at
+// the specific requirement instead of the whole section.
+const SUBSECTION_PATTERN = /(?:^|\n|\.\s)\(([0-9]{1,2}|[a-z]{1,4})\)\s+/gm;
+
+function splitIntoSubsections(sectionBody) {
+  const matches = [...sectionBody.matchAll(SUBSECTION_PATTERN)];
+  // Require at least 2 hits before treating it as real subsection
+  // structure — a single stray "(a)" is more likely an inline aside than
+  // an enumerated list.
+  if (matches.length < 2) return [{ marker: "", body: sectionBody }];
+
+  const parts = [];
+  if (matches[0].index > 0) {
+    const preamble = sectionBody.slice(0, matches[0].index);
+    if (preamble.trim().length > 20) parts.push({ marker: "", body: preamble });
+  }
+  let parentMarker = "";
+  for (let i = 0; i < matches.length; i++) {
+    const raw = matches[i][1];
+    const isNumeric = /^[0-9]+$/.test(raw);
+    let marker;
+    if (isNumeric) {
+      // A numbered marker starts a new top-level subsection — remember it
+      // so any lettered markers that follow nest underneath it.
+      parentMarker = `(${raw})`;
+      marker = parentMarker;
+    } else {
+      marker = parentMarker ? `${parentMarker}(${raw})` : `(${raw})`;
+    }
+    const start = matches[i].index;
+    const end = i + 1 < matches.length ? matches[i + 1].index : sectionBody.length;
+    parts.push({ marker, body: sectionBody.slice(start, end) });
+  }
+  return parts.filter((p) => p.body.trim().length > 20);
+}
+
 function chunkText(rawText, { maxLen = 900, overlap = 150, minLen = 60 } = {}) {
   const text = rawText.replace(/\s+/g, " ").trim();
   const chunks = [];
@@ -161,29 +200,36 @@ function buildEntries(rawText, { idBase, title, url, jurisdiction, citationPrefi
   let sIdx = 0;
   const GENERIC_MARKERS = new Set(["§", "sec", "sec.", "section"]);
   for (const sec of sections) {
-    const pieces = chunkText(sec.body);
-    for (let i = 0; i < pieces.length; i++) {
-      let citation;
-      if (sec.sectionNumber && sec.prefix && !GENERIC_MARKERS.has(sec.prefix.toLowerCase())) {
-        // A real code prefix was found right in the text (e.g. "AS 08.80.168",
-        // "RCW 18.64.005") — use it as-is, it's already a complete citation.
-        citation = `${sec.prefix.toUpperCase()} ${sec.sectionNumber}`;
-      } else if (sec.sectionNumber) {
-        // Only a generic marker ("§", "Sec.") was found — compose with
-        // whatever prefix the admin panel supplied for this upload.
-        citation = `${citationPrefix ? citationPrefix + " " : ""}§ ${sec.sectionNumber}`;
-      } else {
-        citation = fallbackCitation || title || url || "Uploaded source";
+    let baseCitation;
+    if (sec.sectionNumber && sec.prefix && !GENERIC_MARKERS.has(sec.prefix.toLowerCase())) {
+      // A real code prefix was found right in the text (e.g. "AS 08.80.168",
+      // "RCW 18.64.005") — use it as-is, it's already a complete citation.
+      baseCitation = `${sec.prefix.toUpperCase()} ${sec.sectionNumber}`;
+    } else if (sec.sectionNumber) {
+      // Only a generic marker ("§", "Sec.") was found — compose with
+      // whatever prefix the admin panel supplied for this upload.
+      baseCitation = `${citationPrefix ? citationPrefix + " " : ""}§ ${sec.sectionNumber}`;
+    } else {
+      baseCitation = fallbackCitation || title || url || "Uploaded source";
+    }
+
+    const subsections = sec.sectionNumber ? splitIntoSubsections(sec.body) : [{ marker: "", body: sec.body }];
+    let subIdx = 0;
+    for (const sub of subsections) {
+      const citation = sub.marker ? `${baseCitation}${sub.marker}` : baseCitation;
+      const pieces = chunkText(sub.body);
+      for (let i = 0; i < pieces.length; i++) {
+        entries.push({
+          id: sanitizeVectorId(`${idBase}-${sIdx}-${subIdx}-${i}`),
+          citation,
+          title: title || url || "Uploaded source",
+          url: url || "",
+          jurisdiction: jurisdiction || "Federal",
+          sourceKey: sourceKey || url || slugify(title),
+          text: pieces[i],
+        });
       }
-      entries.push({
-        id: sanitizeVectorId(`${idBase}-${sIdx}-${i}`),
-        citation,
-        title: title || url || "Uploaded source",
-        url: url || "",
-        jurisdiction: jurisdiction || "Federal",
-        sourceKey: sourceKey || url || slugify(title),
-        text: pieces[i],
-      });
+      subIdx++;
     }
     sIdx++;
   }

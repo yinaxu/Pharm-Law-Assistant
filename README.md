@@ -1,74 +1,84 @@
-# Pharmacy Law Assistant — portfolio site + RAG chatbot
+# Pharmacy Law Assistant: Grounded RAG Architecture for Regulatory Information Synthesis
 
-A GitHub Pages portfolio showcasing a retrieval-augmented pharmacy law
-chatbot. It answers questions grounded in a knowledge base you build by
-**scraping web pages** or **uploading files** — never from the model's own
-memory — and every answer cites back to its source.
+[![Live Demo](https://img.shields.io/badge/Live_Demo-GitHub_Pages-2EA44F?style=for-the-badge)](https://yinaxu.github.io/Pharm-Law-Assistant/)
 
-https://yinaxu.github.io/Pharm-Law-Assistant/
+## Overview
+Navigating pharmacy regulations, board rules, and state/federal controlled substance statutes requires absolute precision. Large Language Models (LLMs) often hallucinate or blend state-specific regulatory nuances, making ungrounded AI unsafe for legal or clinical reference.
 
-**Full setup walkthrough: see [`DEPLOY.md`](DEPLOY.md).** This file just
-covers the architecture.
+The **Pharmacy Law Assistant** is an educational, retrieval-augmented generation (RAG) system designed to test and demonstrate **strict context-grounded retrieval**. The system enforces zero-hallucination boundaries by ensuring the LLM answers queries *exclusively* from an ingested knowledge base of primary statutory texts, citing exact sources for every statement.
 
-## The three pieces
+---
 
-| Piece | What it does | Where it lives |
-|---|---|---|
-| `index.html` / `styles.css` / `script.js` | Public portfolio page + chat demo | GitHub Pages |
-| `admin.html` | Owner-only tool: scrape a URL or upload a file into the corpus | GitHub Pages (unlinked, protected by an admin key) |
-| `worker/worker.js` | Retrieval + calls Gemini to answer; also handles scraping/ingestion | Cloudflare Workers |
+## Core Technical & Analytical Highlights
 
-GitHub Pages can't run a server or hold secrets, so the actual thinking and
-storage live in the Worker. The two frontend pages just talk to it over
-`fetch()`.
+* **Strict Source Grounding:** Designed to mitigate LLM hallucinations in high-stakes domain topics. The model is constrained to answer *only* using retrieved statutory excerpts.
+* **Deterministic Source Attribution:** Answers are accompanied by precise inline citations, enabling immediate verification against primary regulatory texts.
+* **Dynamic Knowledge Ingestion Pipeline:** Custom ingestion workflow capable of parsing, cleaning, and chunking heterogenous source material (PDF statutes, state board web pages, text files).
+* **Privacy & Access Control:** Admin-authenticated pipeline for controlled corpus management, ensuring data integrity across ingested regulatory sources.
 
-## How a source gets in
+---
 
-1. You open `admin.html`, paste a URL (or upload a `.txt`/`.md`/`.html`/`.pdf`).
-2. **For a URL**: the Worker fetches the page and strips it down to plain
-   text using Cloudflare's built-in `HTMLRewriter` (removes nav/scripts/ads).
-3. **For a file**: the same extraction happens in your browser instead —
-   plain text and Markdown are read directly, HTML is parsed and stripped
-   with the browser's own parser, and PDFs are read page-by-page with
-   PDF.js. You see the extracted text and can edit it before saving.
-4. Either way, the text gets split into ~900-character overlapping chunks
-   and stored in Cloudflare KV (a small key-value database), tagged with a
-   citation and the original URL (if any).
+## System Architecture
 
-## How a question gets answered
+The project consists of a lightweight frontend interface coupled with a serverless edge processing layer to handle retrieval, context construction, and generative grounding.
 
-1. The question is tokenized and scored against every stored chunk
-   (keyword overlap + citation-number matching).
-2. The top 4 matches — and only those — are placed in Gemini's context with
-   an instruction to answer strictly from them and cite which excerpt
-   supports each claim.
-3. The frontend renders the answer with clickable citation chips.
+```
+┌─────────────────────────────────┐
+│       User Query Interface      │
+│     (GitHub Pages Frontend)     │
+└────────────────┘────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│     Cloudflare Worker (Edge)    │
+│  - Query Pre-processing         │
+│  - Keyword & Citation Retrieval │
+│  - Context Window Assembly      │
+└────────────────┬────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│      Context-Grounded LLM       │
+│  (Strict Zero-Memory Prompting) │
+└────────────────┬────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│ Cited Output with Primary Links │
+└─────────────────────────────────┘
+```
 
-No scraping happens at question-answering time — sources are added ahead of
-time through the admin panel, so answering stays fast and doesn't depend on
-a target website being reachable at that exact moment.
+### 1. Regulatory Corpus Ingestion & Text Processing
+* **Document Parsing:** Browser-side and edge-side text extraction using `HTMLRewriter` and `PDF.js` to strip layout noise, scripts, and navigation artifacts, isolating clean legal prose.
+* **Semantic Chunking:** Text is broken down into structured, overlapping ~900-character segments to preserve regulatory context across sentence boundaries.
+* **Key-Value Indexing:** Text chunks are tagged with specific metadata (source URLs, citation identifiers, upload timestamps) and stored in Cloudflare KV.
 
-## Security note
+### 2. Retrieval & Context Assembly
+* **Targeted Scoring:** Incoming user queries are processed against the KV corpus to evaluate keyword overlap and structural relevancy.
+* **Strict Context Windowing:** Only the top-scoring statutory excerpts are loaded into the prompt context window.
+* **Strict Prompt Engineering:** The LLM is explicitly instructed to act as a pure synthesizer of the provided excerpts. If the answer is not present in the ingested excerpts, the system declines to answer rather than drawing from training memory.
 
-The `/ingest/url` and `/ingest/text` endpoints require an `ADMIN_KEY`
-header. Without that, anyone who found your Worker URL could make it fetch
-arbitrary sites on your Cloudflare bill. Keep the admin key private and
-don't commit it anywhere — `DEPLOY.md` walks through setting it as a
-Cloudflare secret, never as code.
+---
 
-## Extending it
+## Project Structure
 
-- **Swap keyword search for real embeddings**: replace `retrieve()` in
-  `worker.js` with an embeddings API call + cosine similarity — everything
-  else stays the same.
-- **Add state pharmacy law**: scrape/upload it like anything else, just
-  label the citation clearly per-state since it varies widely.
-- **Scheduled re-scraping**: Cloudflare Workers support Cron Triggers if you
-  want previously-added URLs re-scraped periodically to catch regulation
-  changes — not included here, but a natural next step.
+```text
+├── index.html / script.js   # Public interface for query execution and citation display
+├── admin.html               # Secure administrative panel for document ingestion
+├── worker/
+│   └── worker.js            # Edge worker handling retrieval, Gemini API execution, and ingestion
+└── DEPLOY.md                # Deployment and environment setup documentation
+```
+
+---
+
+## Future Enhancements & Clinical Applications
+
+* **Vector Search Integration:** Upgrading keyword search scoring to dense vector embeddings (cosine similarity) for improved semantic matching of complex legal phrasing.
+* **Multi-State Regulatory Comparison:** Expanding the schema to tag and filter statutes by jurisdiction (e.g., Federal vs. State Board of Pharmacy differences).
+* **Automated Cron Ingestion:** Implementing scheduled scraping triggers to detect and ingest regulatory updates or board newsletters automatically.
+
+---
 
 ## Disclaimer
-
-Educational demo only — not legal advice. Accuracy depends entirely on
-what's been scraped or uploaded; verify anything consequential against the
-primary source.
+*This project is an educational simulation and portfolio demonstration of Retrieval-Augmented Generation (RAG) principles applied to domain-specific information synthesis. It does not constitute formal legal advice, clinical decision support, or official regulatory guidance.*
