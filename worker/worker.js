@@ -40,19 +40,62 @@ const SEED_CORPUS = [
   },
 ];
 
-const SYSTEM_PROMPT = `You are a pharmacy law research assistant. Answer using ONLY the CONTEXT
-excerpts provided in the user message. Every factual claim must trace back to
-one of them.
+const SYSTEM_PROMPT = `You are explaining pharmacy law to a working pharmacist, not to another
+lawyer. They want to know what they can actually do and what they need to watch out for,
+not a restatement of statutory language. Answer using ONLY the CONTEXT excerpts provided
+in the user message. Every factual claim must trace back to one of them.
 
-- If the context doesn't cover the question, say so plainly and name what
-  topic to ask about instead — never fall back on outside knowledge.
-- Draw logical inferences: connect natural language terms (e.g. "write prescriptions", "prescribe") to statutory terms (e.g. "initiating or modifying drug therapy", "prescriptive authority").
-- This may be a follow-up to an earlier turn in the conversation. Resolve
-  pronouns and implicit references against the prior turns.
-- Each excerpt is labeled with its jurisdiction (Federal, or a specific state).
-  If two or more excerpts address the same topic and their jurisdictions disagree,
-  explicitly flag it and state which rule is more restrictive.
-- Be precise, concise, and clear (3–6 sentences).
+FORMAT (follow this every time, it matters more than brevity):
+- Start with one or two plain sentences that directly answer the question.
+- If the answer naturally splits into a few distinct stages or categories (for example,
+  "core requirements" vs "how to apply" vs "staying compliant"), group them under short
+  section headings, each on its own line starting with "### ".
+- Within a section (or the whole answer, if it doesn't need headings), list each distinct
+  requirement, condition, step, exception, or timeline on its own line starting with "- ".
+  Don't cram several into one paragraph.
+- Inside a bullet you may lead with a short bold label before a colon to help scanning,
+  written as **Label:** the rest of the sentence — e.g. "**Pharmacist-in-charge:** must hold
+  an active license in this state." Only use ** for that, nowhere else, and only when a
+  short label genuinely makes the bullet easier to scan.
+- If it genuinely helps, close with a short paragraph of practical context: what this looks
+  like day to day, a common mistake, or a related detail a pharmacist would reasonably
+  wonder about right after asking this. Skip it if there's nothing useful to add.
+- Do not invent headings, bullets, or a bold label just to look thorough. If the loaded
+  excerpts only support two plain sentences, write two plain sentences. Structure should
+  reflect how much the source material actually contains, not the other way around.
+
+LANGUAGE:
+- Translate legal phrasing into plain terms. Don't just swap words and call it done, actually
+  explain what a term of art means the first time it shows up (e.g. what counts as a
+  "genuine emergency," what "corresponding responsibility" obligates the pharmacist to do).
+- Write the way you'd explain it to a colleague at the counter, not the way the regulation
+  is written.
+
+CONTENT:
+- Never use a statute or rule number as a stand-in for its content. If an excerpt only says
+  something like "must comply with WAC 246-945-230" without stating what that section
+  actually requires, do not repeat that sentence back as your answer. Instead say plainly
+  that the loaded sources reference that requirement but don't include its actual text, and
+  name the specific section that's missing so it can be added as a source. A citation number
+  is never itself an answer.
+- Never state a specific number, deadline, fee, form name, or portal name unless it is
+  actually present in the CONTEXT excerpts. If a pharmacist would obviously want that detail
+  and it isn't in the loaded sources, say plainly that it isn't in what's loaded rather than
+  filling it in from general knowledge, even if you're confident it's typically correct.
+- Never cite or reference any source other than the CONTEXT excerpts provided, and never
+  imply an answer came from outside this tool's loaded material. If an outside page would
+  answer the question better, say that adding it as a source would help, don't answer as if
+  you'd already read it.
+- If the context doesn't cover the question, say so plainly and name what topic to ask
+  about instead — never fall back on outside knowledge.
+- Draw logical inferences: connect natural language terms (e.g. "write prescriptions",
+  "prescribe") to statutory terms (e.g. "initiating or modifying drug therapy",
+  "prescriptive authority").
+- This may be a follow-up to an earlier turn in the conversation. Resolve pronouns and
+  implicit references against the prior turns.
+- Each excerpt is labeled with its jurisdiction (Federal, or a specific state). If two or
+  more excerpts address the same topic and their jurisdictions disagree, give that its own
+  bullet and state plainly which rule is stricter.
 - Do not list source citations in your prose; the interface displays sources separately.
 - Educational information only; not legal advice.
 - After the answer, on its own final line, output exactly:
@@ -290,7 +333,9 @@ async function ingestEntries(entries, env) {
     return;
   }
 
-  const BATCH_SIZE = 500; // Keeps total subrequests safely under Cloudflare's 50 limit
+  const BATCH_SIZE = 90; // @cf/baai/bge-small-en-v1.5 rejects large batches (~100 texts/call);
+                          // a big PDF can chunk into thousands of pieces, so this must stay well
+                          // under both that model limit and Cloudflare's subrequest ceiling.
 
   for (let i = 0; i < sanitizedEntries.length; i += BATCH_SIZE) {
     const chunk = sanitizedEntries.slice(i, i + BATCH_SIZE);
@@ -464,7 +509,7 @@ async function answerQuestion(question, corpus, env, history = [], jurisdictions
             parts: [{ text: `CONTEXT:\n${contextBlock}\n\nQUESTION: ${question}` }],
           },
         ],
-        generationConfig: { maxOutputTokens: 600, temperature: 0.2 },
+        generationConfig: { maxOutputTokens: 1300, temperature: 0.2 },
       }),
     }
   );
@@ -569,62 +614,72 @@ export default {
     // Ingest URL route
     if (url.pathname === "/ingest/url" && request.method === "POST") {
       if (!isAdmin(request, env)) return json({ error: "Unauthorized" }, 401);
-      const body = await request.json();
-      const targetUrl = (body.url || "").trim();
-      if (!targetUrl) return json({ error: 'Missing "url"' }, 400);
+      try {
+        const body = await request.json();
+        const targetUrl = (body.url || "").trim();
+        if (!targetUrl) return json({ error: 'Missing "url"' }, 400);
 
-      const pageRes = await fetch(targetUrl, {
-        headers: { "User-Agent": "PharmLawAssistantBot/1.0" },
-      });
-      if (!pageRes.ok) return json({ error: `Fetch failed HTTP ${pageRes.status}` }, 502);
+        const pageRes = await fetch(targetUrl, {
+          headers: { "User-Agent": "PharmLawAssistantBot/1.0" },
+        });
+        if (!pageRes.ok) return json({ error: `Fetch failed HTTP ${pageRes.status}` }, 502);
 
-      const { text, title } = await extractTextFromHtml(pageRes);
-      if (!text || text.length < 100) return json({ error: "Insufficient text found." }, 422);
+        const { text, title } = await extractTextFromHtml(pageRes);
+        if (!text || text.length < 100) return json({ error: "Insufficient text found." }, 422);
 
-      const sourceKey = targetUrl;
-      const replaced = await replaceSource(sourceKey, env);
+        const sourceKey = targetUrl;
+        const replaced = await replaceSource(sourceKey, env);
 
-      const additions = buildEntries(text, {
-        idBase: slugify(targetUrl),
-        title,
-        url: targetUrl,
-        jurisdiction: body.jurisdiction || "Federal",
-        citationPrefix: body.citationPrefix || "",
-        fallbackCitation: body.citation || "",
-        sourceKey,
-      });
+        const additions = buildEntries(text, {
+          idBase: slugify(targetUrl),
+          title,
+          url: targetUrl,
+          jurisdiction: body.jurisdiction || "Federal",
+          citationPrefix: body.citationPrefix || "",
+          fallbackCitation: body.citation || "",
+          sourceKey,
+        });
 
-      await ingestEntries(additions, env);
-      const corpus = await loadCorpus(env);
+        await ingestEntries(additions, env);
+        const corpus = await loadCorpus(env);
 
-      return json({ added: additions.length, replaced, totalChunks: corpus.length, title });
+        return json({ added: additions.length, replaced, totalChunks: corpus.length, title });
+      } catch (err) {
+        console.error("Ingest URL Error:", err);
+        return json({ error: "Ingest failed", details: err.message }, 500);
+      }
     }
 
     // Ingest Text route
     if (url.pathname === "/ingest/text" && request.method === "POST") {
       if (!isAdmin(request, env)) return json({ error: "Unauthorized" }, 401);
-      const body = await request.json();
-      const text = (body.text || "").trim();
-      if (!text) return json({ error: 'Missing "text"' }, 400);
+      try {
+        const body = await request.json();
+        const text = (body.text || "").trim();
+        if (!text) return json({ error: 'Missing "text"' }, 400);
 
-      const title = body.title || "Uploaded document";
-      const sourceKey = `${(body.jurisdiction || "Federal").toLowerCase()}::${slugify(title)}`;
-      const replaced = await replaceSource(sourceKey, env);
+        const title = body.title || "Uploaded document";
+        const sourceKey = `${(body.jurisdiction || "Federal").toLowerCase()}::${slugify(title)}`;
+        const replaced = await replaceSource(sourceKey, env);
 
-      const additions = buildEntries(text, {
-        idBase: `${slugify(title)}-${Date.now()}`,
-        title,
-        url: body.sourceUrl || "",
-        jurisdiction: body.jurisdiction || "Federal",
-        citationPrefix: body.citationPrefix || "",
-        fallbackCitation: body.citation || "",
-        sourceKey,
-      });
+        const additions = buildEntries(text, {
+          idBase: `${slugify(title)}-${Date.now()}`,
+          title,
+          url: body.sourceUrl || "",
+          jurisdiction: body.jurisdiction || "Federal",
+          citationPrefix: body.citationPrefix || "",
+          fallbackCitation: body.citation || "",
+          sourceKey,
+        });
 
-      await ingestEntries(additions, env);
-      const corpus = await loadCorpus(env);
+        await ingestEntries(additions, env);
+        const corpus = await loadCorpus(env);
 
-      return json({ added: additions.length, replaced, totalChunks: corpus.length });
+        return json({ added: additions.length, replaced, totalChunks: corpus.length });
+      } catch (err) {
+        console.error("Ingest Text Error:", err);
+        return json({ error: "Ingest failed", details: err.message }, 500);
+      }
     }
 
     // Reset Corpus route

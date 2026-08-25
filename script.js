@@ -54,43 +54,9 @@ async function loadCorpusCount() {
   try {
     const res = await fetch(`${WORKER_URL}/corpus`);
     const data = await res.json();
-    countEl.textContent = `${data.count} chunk${data.count === 1 ? "" : "s"} indexed`;
+    countEl.textContent = `${data.count} source${data.count === 1 ? "" : "s"} loaded`;
   } catch {
     countEl.textContent = "";
-  }
-}
-
-async function loadSourceList() {
-  const listEl = document.getElementById("source-list");
-  if (!isConfigured()) {
-    listEl.innerHTML = '<span class="jurisdiction-label">Demo not configured yet.</span>';
-    return;
-  }
-  try {
-    const res = await fetch(`${WORKER_URL}/corpus`);
-    const data = await res.json();
-    // De-duplicate down to one entry per (title, url) pair so a document
-    // split into many sections shows once, not once per section.
-    const seen = new Map();
-    for (const item of data.items) {
-      const key = `${item.title}|${item.url}`;
-      if (!seen.has(key)) seen.set(key, item);
-    }
-    const unique = Array.from(seen.values());
-    if (unique.length === 0) {
-      listEl.innerHTML = '<span class="jurisdiction-label">Nothing indexed yet.</span>';
-      return;
-    }
-    listEl.innerHTML = unique
-      .map((item) => {
-        const label = `${item.jurisdiction || "Federal"} — ${item.title}`;
-        return item.url
-          ? `<a class="source-pill" href="${item.url}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`
-          : `<span class="source-pill">${escapeHtml(label)}</span>`;
-      })
-      .join("");
-  } catch {
-    listEl.innerHTML = '<span class="jurisdiction-label">Couldn\'t load sources.</span>';
   }
 }
 
@@ -158,7 +124,8 @@ function addAnswer(answerText, sources, confidence, followups, isError = false) 
     wrap.appendChild(row);
   }
 
-  const answer = el("div", "answer-text", answerText);
+  const answer = el("div", "answer-text");
+  answer.innerHTML = formatAnswerHtml(answerText);
   wrap.appendChild(answer);
 
   if (sources && sources.length) {
@@ -209,6 +176,67 @@ function escapeHtml(str) {
   return str.replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   }[c]));
+}
+
+// Escapes a line of model output, then turns **bold** into <strong>. The
+// model is instructed to only ever use ** for that one purpose.
+function inlineFormat(str) {
+  return escapeHtml(str).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+}
+
+// Turns the model's plain-text answer into HTML. The model is instructed to
+// use "### " for an optional section heading, "- " for a bullet item, and
+// blank lines between blocks — this walks line by line rather than assuming
+// perfect blank-line placement, so it stays robust either way.
+function formatAnswerHtml(rawText) {
+  const text = (rawText || "").trim();
+  if (!text) return "";
+
+  let html = "";
+  let listBuffer = [];
+  let paraBuffer = [];
+
+  function flushList() {
+    if (listBuffer.length) {
+      html += `<ul class="answer-list">${listBuffer
+        .map((l) => `<li>${inlineFormat(l)}</li>`)
+        .join("")}</ul>`;
+      listBuffer = [];
+    }
+  }
+  function flushPara() {
+    if (paraBuffer.length) {
+      html += `<p>${paraBuffer.map(inlineFormat).join("<br>")}</p>`;
+      paraBuffer = [];
+    }
+  }
+
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) {
+      flushList();
+      flushPara();
+      continue;
+    }
+    const heading = line.match(/^#{2,4}\s+(.*)$/);
+    if (heading) {
+      flushList();
+      flushPara();
+      html += `<h4 class="answer-heading">${inlineFormat(heading[1])}</h4>`;
+      continue;
+    }
+    const bullet = line.match(/^[-•]\s+(.*)$/);
+    if (bullet) {
+      flushPara();
+      listBuffer.push(bullet[1]);
+      continue;
+    }
+    flushList();
+    paraBuffer.push(line);
+  }
+  flushList();
+  flushPara();
+  return html;
 }
 
 function openInspector(source) {
@@ -323,6 +351,117 @@ document.querySelectorAll(".sample-chip").forEach((btn) => {
   });
 });
 
+// ---------------------------------------------------------------------
+// Compare states
+// ---------------------------------------------------------------------
+const compareSelectA = document.getElementById("compare-select-a");
+const compareSelectB = document.getElementById("compare-select-b");
+const compareForm = document.getElementById("compare-form");
+const compareInput = document.getElementById("compare-input");
+const compareSubmit = document.getElementById("compare-submit");
+const compareNote = document.getElementById("compare-note");
+const compareResults = document.getElementById("compare-results");
+
+async function initCompare() {
+  if (!isConfigured()) {
+    compareNote.textContent = "This demo isn't wired up to a live backend yet. See DEPLOY.md.";
+    compareForm.querySelectorAll("input, button").forEach((n) => (n.disabled = true));
+    return;
+  }
+  try {
+    const res = await fetch(`${WORKER_URL}/jurisdictions`);
+    const data = await res.json();
+    const jurisdictions = (data.jurisdictions && data.jurisdictions.length)
+      ? data.jurisdictions
+      : ["Federal"];
+    fillCompareSelect(compareSelectA, jurisdictions, 0);
+    fillCompareSelect(compareSelectB, jurisdictions, jurisdictions.length > 1 ? 1 : 0);
+    compareNote.textContent = jurisdictions.length > 1
+      ? "Only jurisdictions with real sources loaded will show a meaningful difference."
+      : "Only federal law is loaded so far. Add a state's regulations in the admin panel to compare them here.";
+  } catch {
+    fillCompareSelect(compareSelectA, ["Federal"], 0);
+    fillCompareSelect(compareSelectB, ["Federal"], 0);
+    compareNote.textContent = "Couldn't load the list of jurisdictions.";
+  }
+}
+
+function fillCompareSelect(selectEl, jurisdictions, defaultIndex) {
+  selectEl.innerHTML = jurisdictions
+    .map((j) => `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`)
+    .join("");
+  selectEl.selectedIndex = defaultIndex;
+}
+
+function renderCompareColumn(titleEl, bodyEl, jurisdictionLabel) {
+  titleEl.textContent = jurisdictionLabel;
+  bodyEl.innerHTML = '<p class="compare-loading">Checking the law…</p>';
+}
+
+async function fetchCompareAnswer(question, jurisdiction) {
+  const res = await fetch(WORKER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, jurisdictions: [jurisdiction] }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Something went wrong.");
+  return data;
+}
+
+function paintCompareColumn(bodyEl, data) {
+  bodyEl.innerHTML = "";
+  const answerDiv = el("div", "compare-answer-text");
+  answerDiv.innerHTML = formatAnswerHtml(data.answer);
+  bodyEl.appendChild(answerDiv);
+  if (data.sources && data.sources.length) {
+    const chipRow = el("div", "compare-source-chips");
+    data.sources.forEach((s) => {
+      chipRow.appendChild(el("span", "compare-source-chip", s.citation));
+    });
+    bodyEl.appendChild(chipRow);
+  }
+}
+
+compareForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const question = compareInput.value.trim();
+  if (!question) return;
+  if (!isConfigured()) return;
+
+  const jurA = compareSelectA.value;
+  const jurB = compareSelectB.value;
+
+  compareResults.hidden = false;
+  compareSubmit.disabled = true;
+  renderCompareColumn(document.getElementById("compare-title-a"), document.getElementById("compare-body-a"), jurA);
+  renderCompareColumn(document.getElementById("compare-title-b"), document.getElementById("compare-body-b"), jurB);
+
+  const [resultA, resultB] = await Promise.allSettled([
+    fetchCompareAnswer(question, jurA),
+    fetchCompareAnswer(question, jurB),
+  ]);
+
+  const bodyA = document.getElementById("compare-body-a");
+  const bodyB = document.getElementById("compare-body-b");
+
+  if (resultA.status === "fulfilled") {
+    paintCompareColumn(bodyA, resultA.value);
+  } else {
+    bodyA.innerHTML = "";
+    bodyA.appendChild(el("div", "compare-answer-text", "Couldn't get an answer for this side. Try again."));
+  }
+
+  if (resultB.status === "fulfilled") {
+    paintCompareColumn(bodyB, resultB.value);
+  } else {
+    bodyB.innerHTML = "";
+    bodyB.appendChild(el("div", "compare-answer-text", "Couldn't get an answer for this side. Try again."));
+  }
+
+  compareSubmit.disabled = false;
+});
+
 loadJurisdictions();
 loadCorpusCount();
-loadSourceList();
+initCompare();

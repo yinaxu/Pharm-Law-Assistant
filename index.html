@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pharmacy Law Assistant — a grounded RAG chatbot for pharmacy law</title>
-<meta name="description" content="A retrieval-augmented pharmacy law chatbot: every answer is grounded in real federal and state regulatory text, with citations back to the exact source.">
+<title>ScriptLaw — plain-English pharmacy law lookup, with citations</title>
+<meta name="description" content="Ask a pharmacy law question in plain English and get an answer pulled from real federal and state regulatory text, with a citation you can click to check.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -14,32 +14,33 @@
 
 <header class="site-header">
   <div class="wrap">
-    <a class="brand" href="#top"><span class="brand-mark">§</span> pharmacy-law-assistant</a>
+    <a class="brand" href="#top"><span class="brand-mark">§</span> ScriptLaw</a>
     <nav class="site-nav">
-      <a href="#demo">Demo</a>
+      <a href="#demo">Ask a question</a>
       <a href="#how">How it works</a>
-      <a href="#scope">Sources</a>
+      <a href="#compare">Compare states</a>
     </nav>
   </div>
 </header>
 
 <main id="top">
   <section class="hero wrap">
-    <p class="eyebrow">RAG project — federal + state pharmacy law</p>
+    <p class="eyebrow">Federal and state pharmacy law, in one place</p>
     <h1>Search pharmacy law in seconds.</h1>
     <p class="lede">
-      Ask questions in plain English and get cited answers pulled straight from real
-      regulatory text — eCFR, the DEA Diversion Control Division, or a specific state's own
-      regulations. Every source is checkable, not just claimed.
+      Ask a question in plain English and get an answer pulled straight from real regulatory
+      text: eCFR, the DEA Diversion Control Division, or a specific state's own regulations.
+      Every answer links back to the exact section it came from, so you can read the original
+      wording yourself before you rely on it.
     </p>
     <p class="disclaimer-line">
-      Educational demo only, not legal advice. Grounded in federal law (21 CFR Part 1306 and
-      the Controlled Substances Act), with state regulations being added as sources.
+      Educational reference only, not legal advice. Grounded in federal law (21 CFR Part 1306
+      and the Controlled Substances Act), with state regulations being added over time.
     </p>
 
     <div class="demo" id="demo">
       <div class="demo-titlebar">
-        <span><span class="dot"></span>retrieval-augmented · live</span>
+        <span><span class="dot"></span>Live</span>
         <span id="corpus-count">loading…</span>
       </div>
       <div id="chat-log">
@@ -66,55 +67,75 @@
   </section>
 
   <section class="block wrap" id="how">
-    <p class="section-kicker">Architecture</p>
-    <h2>How a question becomes a grounded answer</h2>
+    <p class="section-kicker">How it works</p>
+    <h2>Where each answer actually comes from</h2>
     <p class="intro">
-      No live scraping happens at question time — that's neither reliable nor fast. Instead,
-      sources are added ahead of time through an admin tool, and every answer is limited to
-      what's actually been added.
+      Nothing gets scraped from the web while you wait for an answer, that would be too slow
+      and too unreliable to trust. Instead, the underlying law is loaded ahead of time, and
+      every answer is limited strictly to what's already on file.
     </p>
     <div class="clauses">
       <div class="clause">
-        <div class="letter">(a)</div>
+        <div class="letter">1</div>
         <div>
-          <h3>Retrieve</h3>
-          <p>The question is matched against stored excerpts from eCFR, the DEA, and state boards of pharmacy, ranked by how closely each excerpt relates to what's being asked.</p>
+          <h3>Find the relevant law</h3>
+          <p>Your question is matched against the statutes and regulations already loaded: federal rules, DEA guidance, and any state regulations that have been added.</p>
         </div>
       </div>
       <div class="clause">
-        <div class="letter">(b)</div>
+        <div class="letter">2</div>
         <div>
-          <h3>Ground</h3>
-          <p>Only the best-matching excerpts — never the open web, never the model's own memory — are handed to Google's Gemini 3.5 Flash Lite with an explicit instruction to answer from them alone, or say plainly that nothing loaded so far covers the question.</p>
+          <h3>Answer only from that law</h3>
+          <p>The answer is written strictly from those matching sections. It never fills in gaps from general knowledge, and if nothing on file actually covers your question, it says so instead of guessing.</p>
         </div>
       </div>
       <div class="clause">
-        <div class="letter">(c)</div>
+        <div class="letter">3</div>
         <div>
-          <h3>Cite</h3>
-          <p>Every answer returns citations tied to a specific section — not just "somewhere in this document" — and clicking one opens the exact excerpt with the relevant sentence highlighted, plus a link that highlights that same passage on the live source page.</p>
+          <h3>Show you the source</h3>
+          <p>Every answer comes with citations you can click. Doing so opens the exact passage it's based on, with a link to that same passage on the original source page so you can double-check the wording yourself.</p>
         </div>
       </div>
       <div class="clause">
-        <div class="letter">(d)</div>
+        <div class="letter">4</div>
         <div>
-          <h3>Flag conflicts</h3>
-          <p>Every excerpt is tagged with its jurisdiction. When a federal rule and a state rule — or two states — genuinely disagree on the same question, the answer calls it out explicitly and says which one is more restrictive, instead of silently picking one.</p>
+          <h3>Flag disagreements</h3>
+          <p>When federal law and a state's law, or two states, genuinely disagree on the same question, the answer says so directly and notes which one is stricter, rather than quietly picking one.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="block wrap" id="scope">
-    <p class="section-kicker">Current sources</p>
-    <h2>What's actually loaded right now</h2>
+  <section class="block wrap" id="compare">
+    <p class="section-kicker">Compare states</p>
+    <h2>See how two states handle the same question</h2>
     <p class="intro">
-      Starts with a small set covering corresponding responsibility, Schedule II
-      refill/emergency rules, and the five controlled-substance schedules — and grows as
-      sources get added. Every entry below links straight to its original page:
+      Pick two jurisdictions, ask one question, and each side answers strictly from that
+      jurisdiction's own regulations (plus the federal baseline). Only jurisdictions with
+      real sources loaded will show a meaningful difference; anything else falls back to
+      federal law alone.
     </p>
-    <div class="source-list" id="source-list">
-      <span class="jurisdiction-label">loading…</span>
+    <div class="compare-panel">
+      <div class="compare-picker-row">
+        <select id="compare-select-a" class="compare-select"></select>
+        <span class="compare-vs">vs</span>
+        <select id="compare-select-b" class="compare-select"></select>
+      </div>
+      <form class="compare-form" id="compare-form">
+        <input type="text" id="compare-input" placeholder="e.g. Can a pharmacist refill a Schedule II prescription?" autocomplete="off" maxlength="300">
+        <button type="submit" id="compare-submit">Compare</button>
+      </form>
+      <p class="compare-note" id="compare-note"></p>
+      <div class="compare-results" id="compare-results" hidden>
+        <div class="compare-column" id="compare-column-a">
+          <div class="compare-column-title" id="compare-title-a"></div>
+          <div class="compare-column-body" id="compare-body-a"></div>
+        </div>
+        <div class="compare-column" id="compare-column-b">
+          <div class="compare-column-title" id="compare-title-b"></div>
+          <div class="compare-column-body" id="compare-body-b"></div>
+        </div>
+      </div>
     </div>
   </section>
 </main>
@@ -127,7 +148,7 @@
       anything consequential against the primary source before relying on it, especially
       anything affecting licensure or compliance decisions.
     </p>
-    <p>§ pharmacy-law-assistant · <a href="admin.html">admin</a></p>
+    <p>§ ScriptLaw · <a href="admin.html">admin</a></p>
   </div>
 </footer>
 

@@ -202,10 +202,54 @@ a:hover { color: var(--amber); }
 .msg-answer .answer-text {
   border-left: 2px solid var(--amber);
   padding-left: 14px;
-  white-space: pre-wrap;
 }
 
 .msg-error .answer-text { border-left-color: #b8460e; color: #f1c9b8; }
+
+.answer-text p,
+.compare-answer-text p {
+  margin: 0 0 10px;
+}
+.answer-text p:last-child,
+.compare-answer-text p:last-child {
+  margin-bottom: 0;
+}
+
+.answer-list,
+.compare-answer-text .answer-list {
+  margin: 0 0 10px;
+  padding-left: 1.1em;
+}
+.answer-list:last-child {
+  margin-bottom: 0;
+}
+.answer-list li {
+  margin-bottom: 6px;
+  padding-left: 2px;
+}
+.answer-list li::marker {
+  color: var(--amber);
+}
+.answer-list li:last-child {
+  margin-bottom: 0;
+}
+
+.answer-heading {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.98rem;
+  color: #f2f4f9;
+  margin: 16px 0 8px;
+}
+.answer-heading:first-child {
+  margin-top: 0;
+}
+
+.answer-text strong,
+.compare-answer-text strong {
+  color: #f2f4f9;
+  font-weight: 600;
+}
 
 /* ---------------------------------- confidence badge -------------------- */
 .answer-row {
@@ -627,25 +671,129 @@ section.block:last-of-type { border-bottom: none; }
   color: var(--ink-soft);
 }
 
-/* ---------------------------------- source chips ------------------------ */
-.source-list {
+/* ---------------------------------- compare states ----------------------- */
+.compare-panel {
+  border: 1px solid var(--panel-dark-line);
+  border-radius: var(--radius);
+  background: var(--panel-dark);
+  padding: 18px 16px 20px;
+}
+
+.compare-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.compare-select {
+  flex: 1;
+  background: #182543;
+  border: 1px solid var(--panel-dark-line);
+  color: #eef1f8;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  padding: 9px 10px;
+  border-radius: var(--radius);
+}
+
+.compare-vs {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: #6d7ea3;
+  flex: none;
+}
+
+.compare-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.compare-form input[type="text"] {
+  flex: 1;
+  background: #182543;
+  border: 1px solid var(--panel-dark-line);
+  color: #eef1f8;
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+}
+
+.compare-form input[type="text"]::placeholder { color: #6d7ea3; }
+
+.compare-form button {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--amber);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  padding: 0 18px;
+  cursor: pointer;
+}
+
+.compare-form button:hover { background: var(--amber-dark); }
+.compare-form button:disabled { opacity: 0.5; cursor: default; }
+
+.compare-note {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: #6d7ea3;
+  margin: 0 0 4px;
+}
+
+.compare-results {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.compare-column {
+  border-left: 2px solid var(--amber);
+  padding-left: 14px;
+}
+
+.compare-column-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8fa0c2;
+  margin-bottom: 8px;
+}
+
+.compare-answer-text,
+.compare-loading {
+  color: #dbe2ee;
+  font-size: 0.92rem;
+}
+
+.compare-loading { color: #6d7ea3; }
+
+.compare-source-chips {
+  margin-top: 10px;
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 6px;
 }
 
-.source-pill {
+.compare-source-chip {
   font-family: var(--font-mono);
-  font-size: 12.5px;
-  border: 1px solid var(--line);
-  background: var(--paper-raised);
-  border-radius: var(--radius);
-  padding: 8px 12px;
-  color: var(--ink-soft);
-  text-decoration: none;
+  font-size: 10.5px;
+  color: #8fa0c2;
+  border: 1px solid var(--panel-dark-line);
+  border-radius: 999px;
+  padding: 3px 9px;
 }
 
-.source-pill:hover { border-color: var(--amber); color: var(--amber-dark); }
+@media (max-width: 640px) {
+  .compare-results { grid-template-columns: 1fr; }
+  .compare-picker-row { flex-direction: column; align-items: stretch; }
+  .compare-vs { text-align: center; }
+}
 
 /* ---------------------------------- docket / other projects ------------- */
 .docket {
