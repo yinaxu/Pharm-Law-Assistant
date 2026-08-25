@@ -7,27 +7,25 @@
 <meta name="description" content="Ask a pharmacy law question in plain English and get an answer pulled from real federal and state regulatory text, with a citation you can click to check.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:wght@500;600&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
-<header class="site-header">
-  <div class="wrap">
-    <a class="brand" href="#top"><span class="brand-mark">§</span> ScriptLaw</a>
-    <nav class="site-nav">
-      <a href="#demo">Ask a question</a>
-      <a href="#how">How it works</a>
-      <a href="#compare">Compare states</a>
-    </nav>
+<nav class="nav">
+  <a href="#top" class="brand">§ ScriptLaw</a>
+  <div class="links">
+    <a href="#demo">Ask a question</a>
+    <a href="#how">How it works</a>
+    <a href="#compare">Compare states</a>
   </div>
-</header>
+</nav>
 
 <main id="top">
-  <section class="hero wrap">
-    <p class="eyebrow">Federal and state pharmacy law, in one place</p>
+  <section class="hero">
+    <div class="eyebrow">Federal and state pharmacy law, in one place</div>
     <h1>Search pharmacy law in seconds.</h1>
-    <p class="lede">
+    <p>
       Ask a question in plain English and get an answer pulled straight from real regulatory
       text: eCFR, the DEA Diversion Control Division, or a specific state's own regulations.
       Every answer links back to the exact section it came from, so you can read the original
@@ -37,15 +35,17 @@
       Educational reference only, not legal advice. Grounded in federal law (21 CFR Part 1306
       and the Controlled Substances Act), with state regulations being added over time.
     </p>
+  </section>
 
-    <div class="demo" id="demo">
+  <div class="wrap">
+    <div class="card demo-card" id="demo">
       <div class="demo-titlebar">
-        <span><span class="dot"></span>Live</span>
+        <span class="demo-live"><span class="dot"></span>Live</span>
         <span id="corpus-count">loading…</span>
       </div>
       <div id="chat-log">
         <div class="msg msg-answer">
-          <div class="answer-text">Ask about corresponding responsibility, Schedule II refills, emergency prescriptions, required prescription elements, or the five controlled-substance schedules. I'll answer only from what's actually loaded below and cite where each fact comes from.</div>
+          <div class="answer-text"><p>Ask about corresponding responsibility, Schedule II refills, emergency prescriptions, required prescription elements, or the five controlled-substance schedules. I'll answer only from what's actually loaded below and cite where each fact comes from.</p></div>
         </div>
       </div>
       <div class="jurisdiction-row" id="jurisdiction-row">
@@ -64,58 +64,46 @@
       </form>
       <p class="demo-note" id="demo-note"></p>
     </div>
-  </section>
+  </div>
 
-  <section class="block wrap" id="how">
-    <p class="section-kicker">How it works</p>
-    <h2>Where each answer actually comes from</h2>
-    <p class="intro">
+  <section class="content-section wrap" id="how">
+    <p class="tag">How it works</p>
+    <h2 class="section-title">Where each answer actually comes from</h2>
+    <p class="section-intro">
       Nothing gets scraped from the web while you wait for an answer, that would be too slow
       and too unreliable to trust. Instead, the underlying law is loaded ahead of time, and
       every answer is limited strictly to what's already on file.
     </p>
-    <div class="clauses">
-      <div class="clause">
-        <div class="letter">1</div>
-        <div>
-          <h3>Find the relevant law</h3>
-          <p>Your question is matched against the statutes and regulations already loaded: federal rules, DEA guidance, and any state regulations that have been added.</p>
-        </div>
+    <div class="teaching-points">
+      <div class="tp-card">
+        <div class="tp-title">1. Find the relevant law</div>
+        <p>Your question is matched against the statutes and regulations already loaded: federal rules, DEA guidance, and any state regulations that have been added.</p>
       </div>
-      <div class="clause">
-        <div class="letter">2</div>
-        <div>
-          <h3>Answer only from that law</h3>
-          <p>The answer is written strictly from those matching sections. It never fills in gaps from general knowledge, and if nothing on file actually covers your question, it says so instead of guessing.</p>
-        </div>
+      <div class="tp-card">
+        <div class="tp-title">2. Answer only from that law</div>
+        <p>The answer is written strictly from those matching sections. It never fills in gaps from general knowledge, and if nothing on file actually covers your question, it says so instead of guessing.</p>
       </div>
-      <div class="clause">
-        <div class="letter">3</div>
-        <div>
-          <h3>Show you the source</h3>
-          <p>Every answer comes with citations you can click. Doing so opens the exact passage it's based on, with a link to that same passage on the original source page so you can double-check the wording yourself.</p>
-        </div>
+      <div class="tp-card">
+        <div class="tp-title">3. Show you the source</div>
+        <p>Every answer comes with citations you can click. Doing so opens the exact passage it's based on, with a link to that same passage on the original source page so you can double-check the wording yourself.</p>
       </div>
-      <div class="clause">
-        <div class="letter">4</div>
-        <div>
-          <h3>Flag disagreements</h3>
-          <p>When federal law and a state's law, or two states, genuinely disagree on the same question, the answer says so directly and notes which one is stricter, rather than quietly picking one.</p>
-        </div>
+      <div class="tp-card">
+        <div class="tp-title">4. Flag disagreements</div>
+        <p>When federal law and a state's law, or two states, genuinely disagree on the same question, the answer says so directly and notes which one is stricter, rather than quietly picking one.</p>
       </div>
     </div>
   </section>
 
-  <section class="block wrap" id="compare">
-    <p class="section-kicker">Compare states</p>
-    <h2>See how two states handle the same question</h2>
-    <p class="intro">
+  <section class="content-section wrap" id="compare">
+    <p class="tag">Compare states</p>
+    <h2 class="section-title">See how two states handle the same question</h2>
+    <p class="section-intro">
       Pick two jurisdictions, ask one question, and each side answers strictly from that
-      jurisdiction's own regulations (plus the federal baseline). Only jurisdictions with
-      real sources loaded will show a meaningful difference; anything else falls back to
-      federal law alone.
+      jurisdiction's own regulations, plus the federal baseline. Only jurisdictions with real
+      sources loaded will show a meaningful difference; anything else falls back to federal
+      law alone.
     </p>
-    <div class="compare-panel">
+    <div class="card compare-panel">
       <div class="compare-picker-row">
         <select id="compare-select-a" class="compare-select"></select>
         <span class="compare-vs">vs</span>
@@ -127,11 +115,11 @@
       </form>
       <p class="compare-note" id="compare-note"></p>
       <div class="compare-results" id="compare-results" hidden>
-        <div class="compare-column" id="compare-column-a">
+        <div class="compare-column compare-column-a" id="compare-column-a">
           <div class="compare-column-title" id="compare-title-a"></div>
           <div class="compare-column-body" id="compare-body-a"></div>
         </div>
-        <div class="compare-column" id="compare-column-b">
+        <div class="compare-column compare-column-b" id="compare-column-b">
           <div class="compare-column-title" id="compare-title-b"></div>
           <div class="compare-column-body" id="compare-body-b"></div>
         </div>
@@ -140,16 +128,11 @@
   </section>
 </main>
 
-<footer class="site-footer">
-  <div class="wrap">
-    <p class="foot-disclaimer">
-      This tool provides general educational information about pharmacy law and is not legal
-      advice. Coverage is limited to whatever sources have actually been added so far — verify
-      anything consequential against the primary source before relying on it, especially
-      anything affecting licensure or compliance decisions.
-    </p>
-    <p>§ ScriptLaw · <a href="admin.html">admin</a></p>
-  </div>
+<footer>
+  This tool provides general educational information about pharmacy law and is not legal
+  advice. Coverage is limited to whatever sources have actually been added so far, so verify
+  anything consequential against the primary source before relying on it, especially anything
+  affecting licensure or compliance decisions. · <a href="admin.html">admin</a>
 </footer>
 
 <div class="inspector-overlay" id="inspector-overlay">

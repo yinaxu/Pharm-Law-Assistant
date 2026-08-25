@@ -333,9 +333,7 @@ async function ingestEntries(entries, env) {
     return;
   }
 
-  const BATCH_SIZE = 90; // @cf/baai/bge-small-en-v1.5 rejects large batches (~100 texts/call);
-                          // a big PDF can chunk into thousands of pieces, so this must stay well
-                          // under both that model limit and Cloudflare's subrequest ceiling.
+  const BATCH_SIZE = 500; // Keeps total subrequests safely under Cloudflare's 50 limit
 
   for (let i = 0; i < sanitizedEntries.length; i += BATCH_SIZE) {
     const chunk = sanitizedEntries.slice(i, i + BATCH_SIZE);
@@ -388,27 +386,38 @@ async function retrieveContext(queryText, corpus, env, jurisdictions = []) {
 
   const queryEmbedding = await env.AI.run("@cf/baai/bge-small-en-v1.5", { text: queryText });
 
-  const matches = await env.VECTOR_INDEX.query(queryEmbedding.data[0], {
-    topK: 8,
-    returnMetadata: true,
-  });
+  const allowedJurisdictions = jurisdictions.length
+    ? Array.from(new Set([...jurisdictions, "Federal"]))
+    : null;
+
+  // Scope the nearest-neighbor search itself to the allowed jurisdictions,
+  // instead of searching globally and filtering afterward. Otherwise a
+  // jurisdiction whose wording happens to embed further from the query (e.g.
+  // "responsible pharmacy manager" vs. "pharmacist-in-charge" for the same
+  // role) gets crowded out of the global top-K by a closer-worded match from
+  // a jurisdiction the user didn't even ask about, before filtering ever runs.
+  const queryOptions = { topK: 12, returnMetadata: true };
+  if (allowedJurisdictions) {
+    queryOptions.filter = { jurisdiction: { $in: allowedJurisdictions } };
+  }
+
+  const matches = await env.VECTOR_INDEX.query(queryEmbedding.data[0], queryOptions);
 
   if (!matches || !matches.matches || matches.matches.length === 0) {
     return [];
   }
 
   const corpusMap = new Map(corpus.map((item) => [item.id, item]));
-  const allowedJurisdictions = jurisdictions.length
-    ? new Set([...jurisdictions, "Federal"])
-    : null;
+  const allowedSet = allowedJurisdictions ? new Set(allowedJurisdictions) : null;
 
+  // Kept as a defensive second check in case the index-level filter above
+  // silently no-ops (e.g. the metadata index for "jurisdiction" hasn't been
+  // created yet — see note below) rather than actually restricting results.
   const results = [];
   for (const match of matches.matches) {
     const doc = corpusMap.get(match.id);
-    if (doc) {
-      if (!allowedJurisdictions || allowedJurisdictions.has(doc.jurisdiction || "Federal")) {
-        results.push({ ...doc, _score: match.score });
-      }
+    if (doc && (!allowedSet || allowedSet.has(doc.jurisdiction || "Federal"))) {
+      results.push({ ...doc, _score: match.score });
     }
   }
 
@@ -614,72 +623,62 @@ export default {
     // Ingest URL route
     if (url.pathname === "/ingest/url" && request.method === "POST") {
       if (!isAdmin(request, env)) return json({ error: "Unauthorized" }, 401);
-      try {
-        const body = await request.json();
-        const targetUrl = (body.url || "").trim();
-        if (!targetUrl) return json({ error: 'Missing "url"' }, 400);
+      const body = await request.json();
+      const targetUrl = (body.url || "").trim();
+      if (!targetUrl) return json({ error: 'Missing "url"' }, 400);
 
-        const pageRes = await fetch(targetUrl, {
-          headers: { "User-Agent": "PharmLawAssistantBot/1.0" },
-        });
-        if (!pageRes.ok) return json({ error: `Fetch failed HTTP ${pageRes.status}` }, 502);
+      const pageRes = await fetch(targetUrl, {
+        headers: { "User-Agent": "PharmLawAssistantBot/1.0" },
+      });
+      if (!pageRes.ok) return json({ error: `Fetch failed HTTP ${pageRes.status}` }, 502);
 
-        const { text, title } = await extractTextFromHtml(pageRes);
-        if (!text || text.length < 100) return json({ error: "Insufficient text found." }, 422);
+      const { text, title } = await extractTextFromHtml(pageRes);
+      if (!text || text.length < 100) return json({ error: "Insufficient text found." }, 422);
 
-        const sourceKey = targetUrl;
-        const replaced = await replaceSource(sourceKey, env);
+      const sourceKey = targetUrl;
+      const replaced = await replaceSource(sourceKey, env);
 
-        const additions = buildEntries(text, {
-          idBase: slugify(targetUrl),
-          title,
-          url: targetUrl,
-          jurisdiction: body.jurisdiction || "Federal",
-          citationPrefix: body.citationPrefix || "",
-          fallbackCitation: body.citation || "",
-          sourceKey,
-        });
+      const additions = buildEntries(text, {
+        idBase: slugify(targetUrl),
+        title,
+        url: targetUrl,
+        jurisdiction: body.jurisdiction || "Federal",
+        citationPrefix: body.citationPrefix || "",
+        fallbackCitation: body.citation || "",
+        sourceKey,
+      });
 
-        await ingestEntries(additions, env);
-        const corpus = await loadCorpus(env);
+      await ingestEntries(additions, env);
+      const corpus = await loadCorpus(env);
 
-        return json({ added: additions.length, replaced, totalChunks: corpus.length, title });
-      } catch (err) {
-        console.error("Ingest URL Error:", err);
-        return json({ error: "Ingest failed", details: err.message }, 500);
-      }
+      return json({ added: additions.length, replaced, totalChunks: corpus.length, title });
     }
 
     // Ingest Text route
     if (url.pathname === "/ingest/text" && request.method === "POST") {
       if (!isAdmin(request, env)) return json({ error: "Unauthorized" }, 401);
-      try {
-        const body = await request.json();
-        const text = (body.text || "").trim();
-        if (!text) return json({ error: 'Missing "text"' }, 400);
+      const body = await request.json();
+      const text = (body.text || "").trim();
+      if (!text) return json({ error: 'Missing "text"' }, 400);
 
-        const title = body.title || "Uploaded document";
-        const sourceKey = `${(body.jurisdiction || "Federal").toLowerCase()}::${slugify(title)}`;
-        const replaced = await replaceSource(sourceKey, env);
+      const title = body.title || "Uploaded document";
+      const sourceKey = `${(body.jurisdiction || "Federal").toLowerCase()}::${slugify(title)}`;
+      const replaced = await replaceSource(sourceKey, env);
 
-        const additions = buildEntries(text, {
-          idBase: `${slugify(title)}-${Date.now()}`,
-          title,
-          url: body.sourceUrl || "",
-          jurisdiction: body.jurisdiction || "Federal",
-          citationPrefix: body.citationPrefix || "",
-          fallbackCitation: body.citation || "",
-          sourceKey,
-        });
+      const additions = buildEntries(text, {
+        idBase: `${slugify(title)}-${Date.now()}`,
+        title,
+        url: body.sourceUrl || "",
+        jurisdiction: body.jurisdiction || "Federal",
+        citationPrefix: body.citationPrefix || "",
+        fallbackCitation: body.citation || "",
+        sourceKey,
+      });
 
-        await ingestEntries(additions, env);
-        const corpus = await loadCorpus(env);
+      await ingestEntries(additions, env);
+      const corpus = await loadCorpus(env);
 
-        return json({ added: additions.length, replaced, totalChunks: corpus.length });
-      } catch (err) {
-        console.error("Ingest Text Error:", err);
-        return json({ error: "Ingest failed", details: err.message }, 500);
-      }
+      return json({ added: additions.length, replaced, totalChunks: corpus.length });
     }
 
     // Reset Corpus route

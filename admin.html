@@ -6,56 +6,58 @@
 <title>ScriptLaw admin</title>
 <meta name="robots" content="noindex, nofollow">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:wght@500;600&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.min.js"></script>
 <style>
   :root {
-    --paper: #e9ebf0; --ink: #16233d; --ink-soft: #46536b; --line: #c7ccd8;
-    --amber: #b8460e; --amber-dark: #8f3608; --ok: #3b6e52; --err: #b8460e;
+    --ink: #14213D; --muted: #8891A0; --muted-light: #B0B7C3;
+    --border: #EAEDF1; --input-border: #DDE2EA; --bg: #FAFBFC; --card: #FFFFFF;
+    --teal: #0F766E; --amber: #B45309; --ok: #0F766E; --err: #B91C1C;
+    --font-display: 'Newsreader', serif; --font-body: 'Inter', sans-serif; --font-mono: 'IBM Plex Mono', monospace;
   }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--paper); color:var(--ink); font-family:"IBM Plex Sans",sans-serif; line-height:1.6; padding:24px 16px 64px; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); line-height:1.6; padding:32px 16px 64px; }
   .wrap { max-width: 720px; margin: 0 auto; }
-  h1 { font-size:1.4rem; margin: 0 0 4px; }
-  .sub { color: var(--ink-soft); font-size:0.9rem; margin: 0 0 28px; }
-  section { background:#f4f5f8; border:1px solid var(--line); border-radius:4px; padding:18px; margin-bottom:20px; }
-  section h2 { font-size:1rem; margin:0 0 12px; }
-  label { display:block; font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-soft); margin: 12px 0 4px; }
+  h1 { font-family:var(--font-display); font-weight:600; font-size:1.5rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size:0.9rem; margin: 0 0 28px; }
+  section { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px 22px; margin-bottom:20px; box-shadow:0 1px 2px rgba(20,33,61,0.04); }
+  section h2 { font-family:var(--font-display); font-weight:600; font-size:1.05rem; margin:0 0 12px; }
+  label { display:block; font-family:var(--font-mono); font-size:12px; color:var(--muted); margin: 12px 0 4px; }
   label:first-of-type { margin-top:0; }
   input[type=text], input[type=password], textarea, input[type=file] {
-    width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:3px;
-    font-family:"IBM Plex Sans",sans-serif; font-size:0.95rem; background:#fff; color:var(--ink);
+    width:100%; padding:9px 10px; border:1px solid var(--input-border); border-radius:8px;
+    font-family:var(--font-body); font-size:0.95rem; background:#fff; color:var(--ink);
   }
-  textarea { min-height:90px; font-family:"IBM Plex Mono",monospace; font-size:12px; }
+  textarea { min-height:90px; font-family:var(--font-mono); font-size:12px; }
   button {
-    margin-top:14px; font-family:"IBM Plex Mono",monospace; font-size:13px;
-    background:var(--amber); color:#fff; border:none; border-radius:3px; padding:10px 16px; cursor:pointer;
+    margin-top:14px; font-family:var(--font-body); font-weight:600; font-size:13px;
+    background:var(--ink); color:#fff; border:none; border-radius:9px; padding:10px 18px; cursor:pointer;
   }
-  button:hover { background:var(--amber-dark); }
+  button:hover { background:#0B1730; }
   button:disabled { opacity:0.5; cursor:default; }
-  button.secondary { background:transparent; color:var(--ink-soft); border:1px solid var(--line); }
-  .status { margin-top:10px; font-family:"IBM Plex Mono",monospace; font-size:12.5px; white-space:pre-wrap; }
+  button.secondary { background:transparent; color:var(--muted); border:1px solid var(--border); }
+  .status { margin-top:10px; font-family:var(--font-mono); font-size:12.5px; white-space:pre-wrap; }
   .status.ok { color:var(--ok); }
   .status.err { color:var(--err); }
-  .status.log { max-height:220px; overflow-y:auto; border-top:1px solid var(--line); padding-top:8px; }
+  .status.log { max-height:220px; overflow-y:auto; border-top:1px solid var(--border); padding-top:8px; }
   .status.log div.ok { color:var(--ok); }
   .status.log div.err { color:var(--err); }
-  .status.log div.pending { color:var(--ink-soft); }
+  .status.log div.pending { color:var(--muted); }
   #batch-list { margin-top:12px; }
-  .batch-row { border-top:1px solid var(--line); padding:10px 0; }
+  .batch-row { border-top:1px solid var(--border); padding:10px 0; }
   .batch-row:first-child { border-top:none; padding-top:0; }
-  .batch-row-head { display:flex; justify-content:space-between; gap:10px; font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-soft); }
+  .batch-row-head { display:flex; justify-content:space-between; gap:10px; font-family:var(--font-mono); font-size:11.5px; color:var(--muted); }
   .batch-row-head .fname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .batch-row input[type=text] { margin-top:6px; font-size:0.9rem; }
   .batch-row details { margin-top:6px; }
-  .batch-row summary { font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--ink-soft); cursor:pointer; }
+  .batch-row summary { font-family:var(--font-mono); font-size:11px; color:var(--muted); cursor:pointer; }
   .batch-row textarea { min-height:70px; margin-top:6px; }
   .batch-row .remove-file { margin-top:6px; padding:5px 10px; font-size:11px; }
-  .corpus-list { font-family:"IBM Plex Mono",monospace; font-size:12px; }
-  .corpus-row { padding:8px 0; border-top:1px solid var(--line); }
+  .corpus-list { font-family:var(--font-mono); font-size:12px; }
+  .corpus-row { padding:8px 0; border-top:1px solid var(--border); }
   .corpus-row:first-child { border-top:none; }
-  .corpus-row a { color: var(--amber-dark); }
-  .worker-config { font-size:0.85rem; color:var(--ink-soft); }
+  .corpus-row a { color: var(--amber); }
+  .worker-config { font-size:0.85rem; color:var(--muted); }
 </style>
 </head>
 <body>
@@ -277,26 +279,49 @@ batchBtn.addEventListener('click', async () => {
     statusEl.scrollTop = statusEl.scrollHeight;
 
     try {
-      const res = await fetch(baseUrl() + '/ingest/text', {
-        method: 'POST',
-        headers: headers(),
-        body: JSON.stringify({
-          text: f.text,
-          title: f.title || f.name,
-          citation: f.title || f.name,
-          jurisdiction,
-          citationPrefix,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        line.className = 'err';
-        line.textContent = `✗ ${f.name} — ${data.error || res.status}`;
+      // If a file is very large, split it into smaller parts client-side
+      // to avoid exceeding Cloudflare Worker CPU limits during ingestion.
+      const MAX_PART_SIZE = 90000; // characters per part (tunable)
+      const text = f.text || '';
+      const parts = [];
+      if (text.length > MAX_PART_SIZE) {
+        for (let i = 0; i < text.length; i += MAX_PART_SIZE) {
+          parts.push(text.slice(i, i + MAX_PART_SIZE));
+        }
       } else {
-        line.className = 'ok';
-        const replacedNote = data.replaced ? `, replaced ${data.replaced} old chunk(s)` : '';
-        line.textContent = `✓ ${f.name} — ${data.added} chunk(s) added${replacedNote}`;
-        okCount++;
+        parts.push(text);
+      }
+
+      for (let p = 0; p < parts.length; p++) {
+        const partText = parts[p];
+        const partTitle = parts.length > 1 ? `${f.title} (part ${p + 1}/${parts.length})` : f.title || f.name;
+
+        const res = await fetch(baseUrl() + '/ingest/text', {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify({
+            text: partText,
+            title: partTitle,
+            citation: partTitle,
+            jurisdiction,
+            citationPrefix,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          line.className = 'err';
+          line.textContent = `✗ ${f.name} — ${data.error || res.status}`;
+          break;
+        } else {
+          line.className = 'ok';
+          const replacedNote = data.replaced ? `, replaced ${data.replaced} old chunk(s)` : '';
+          line.textContent = `✓ ${f.name} — part ${p + 1}/${parts.length} added${replacedNote}`;
+          // Only count the file as OK after all parts succeed
+          if (p === parts.length - 1) okCount++;
+        }
+
+        // Small delay to avoid bursting the worker with many simultaneous CPU-heavy requests
+        await new Promise((r) => setTimeout(r, 250));
       }
     } catch (err) {
       line.className = 'err';
